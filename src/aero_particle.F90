@@ -13,6 +13,7 @@ module pmc_aero_particle
   use pmc_aero_data
   use pmc_spec_file
   use pmc_env_state
+  use pmc_constants
   use pmc_mpi
 #ifdef PMC_USE_MPI
   use mpi
@@ -808,6 +809,34 @@ contains
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+  ! > Returns the critical relative humidity (1).
+  real(kind=dp) function aero_particle_crit_rel_humid_varying_sigma(aero_particle, &
+    aero_data, env_state)
+
+    !> Aerosol particle.
+    type(aero_particle_t), intent(in) :: aero_particle
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+    !> Environment state.
+    type(env_state_t), intent(in) :: env_state
+
+    real(kind=dp) :: A, dry_diam, kappa, d, sigma
+    
+    A = env_state_A(env_state)
+    dry_diam = aero_particle_dry_diameter(aero_particle, aero_data)
+    kappa = aero_particle_solute_kappa(aero_particle, aero_data)
+    d = aero_particle_crit_diameter_varying_sigma(aero_particle, aero_data, env_state, sigma)
+
+    if (d == dry_diam) then
+      aero_particle_crit_rel_humid_varying_sigma = exp(A * sigma / dry_diam)
+    else 
+      aero_particle_crit_rel_humid_varying_sigma = (d**3 - dry_diam**3) / & 
+                  (d**3 - dry_diam**3 * (1d0 - kappa)) * exp(A * sigma / d) 
+    end if     
+ 
+  end function aero_particle_crit_rel_humid_varying_sigma
+  
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !> Returns the critical diameter (m).
   !!
   !! The method is as follows. We need to solve the polynomial
