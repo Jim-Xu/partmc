@@ -70,6 +70,8 @@ module pmc_aero_data
      real(kind=dp), allocatable :: molec_weight(:)
      !> Length \c aero_data_n_spec(aero_data), kappas (1).
      real(kind=dp), allocatable :: kappa(:)
+     !> Length \c aero_data_n_spec(aero_data), sigma (J m-2).
+     real(kind=dp), allocatable :: sigma(:)
      !> Length \c aero_data_n_source(aero_data), source names.
      character(len=AERO_SOURCE_NAME_LEN), allocatable :: source_name(:)
      !> Length \c aero_data_n_weight_classes, weight class names.
@@ -494,12 +496,14 @@ contains
     call ensure_integer_array_size(aero_data%num_ions, n_species)
     call ensure_real_array_size(aero_data%molec_weight, n_species)
     call ensure_real_array_size(aero_data%kappa, n_species)
+    call ensure_real_array_size(aero_data%sigma, n_species)
     do i = 1,n_species
        aero_data%name(i) = species_name(i)(1:AERO_NAME_LEN)
        aero_data%density(i) = species_data(i,1)
        aero_data%num_ions(i) = nint(species_data(i,2))
        aero_data%molec_weight(i) = species_data(i,3)
        aero_data%kappa(i) = species_data(i,4)
+       aero_data%sigma(i) = species_data(i,5)
        call assert_msg(232362742, &
             (aero_data%num_ions(i) == 0) .or. (aero_data%kappa(i) == 0d0), &
             "ions and kappa both non-zero for species " &
@@ -572,6 +576,7 @@ contains
          + pmc_mpi_pack_size_integer_array(val%num_ions) &
          + pmc_mpi_pack_size_real_array(val%molec_weight) &
          + pmc_mpi_pack_size_real_array(val%kappa) &
+         + pmc_mpi_pack_size_real_array(val%sigma) &
          + pmc_mpi_pack_size_string_array(val%source_name) &
          + pmc_mpi_pack_size_string_array(val%weight_class_name) &
          + pmc_mpi_pack_size_fractal(val%fractal)
@@ -602,6 +607,7 @@ contains
     call pmc_mpi_pack_integer_array(buffer, position, val%num_ions)
     call pmc_mpi_pack_real_array(buffer, position, val%molec_weight)
     call pmc_mpi_pack_real_array(buffer, position, val%kappa)
+    call pmc_mpi_pack_real_array(buffer, position, val%sigma)
     call pmc_mpi_pack_string_array(buffer, position, val%source_name)
     call pmc_mpi_pack_string_array(buffer, position, val%weight_class_name)
     call pmc_mpi_pack_fractal(buffer, position, val%fractal)
@@ -635,6 +641,7 @@ contains
     call pmc_mpi_unpack_integer_array(buffer, position, val%num_ions)
     call pmc_mpi_unpack_real_array(buffer, position, val%molec_weight)
     call pmc_mpi_unpack_real_array(buffer, position, val%kappa)
+    call pmc_mpi_unpack_real_array(buffer, position, val%sigma)
     call pmc_mpi_unpack_string_array(buffer, position, val%source_name)
     call pmc_mpi_unpack_string_array(buffer, position, val%weight_class_name)
     call pmc_mpi_unpack_fractal(buffer, position, val%fractal)
@@ -918,6 +925,9 @@ contains
     call pmc_nc_write_real_1d(ncid, aero_data%kappa, &
          "aero_kappa", (/ dimid_aero_species /), unit="1", &
          long_name="hygroscopicity parameters (kappas) of aerosol species")
+    call pmc_nc_write_real_1d(ncid, aero_data%sigma, &
+         "aero_sigma", (/ dimid_aero_species /), unit="J/m2", &
+         long_name="surface tension (sigma) of aerosol species")         
     call pmc_nc_write_integer(ncid, aero_data%i_water, &
          "aero_i_water", long_name="Index of aerosol water or " &
          // "0 if water does not exist.")
@@ -967,6 +977,7 @@ contains
     call pmc_nc_read_integer_1d(ncid, aero_data%num_ions, "aero_num_ions")
     call pmc_nc_read_real_1d(ncid, aero_data%molec_weight, "aero_molec_weight")
     call pmc_nc_read_real_1d(ncid, aero_data%kappa, "aero_kappa")
+    call pmc_nc_read_real_1d(ncid, aero_data%sigma, "aero_sigma")
 
     call pmc_nc_check(nf90_inq_varid(ncid, "aero_species", &
          varid_aero_species))
@@ -1090,6 +1101,7 @@ contains
     allocate(aero_data%num_ions(num_spec))
     allocate(aero_data%molec_weight(num_spec))
     allocate(aero_data%kappa(num_spec))
+    allocate(aero_data%sigma(num_spec))
     allocate(aero_data%camp_particle_spec_id(num_spec))
 
     ! Assume no aerosol water
@@ -1125,6 +1137,12 @@ contains
        if (.not. property_set%get_real(prop_name, &
             aero_data%kappa(i_spec))) then
          call die_msg(944207343, "Missing kappa for aerosol species " &
+              // spec_names(i_spec)%string)
+       end if
+       prop_name = "sigma"
+       if (.not. property_set%get_real(prop_name, &
+            aero_data%sigma(i_spec))) then
+         call die_msg(944207343, "Missing sigma for aerosol species " &
               // spec_names(i_spec)%string)
        end if
        prop_name = "PartMC name"
