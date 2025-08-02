@@ -483,9 +483,9 @@ contains
 
     ! check the data size
     n_species = size(species_data, 1)
-    if (.not. ((size(species_data, 2) == 4) .or. (n_species == 0))) then
+    if (.not. ((size(species_data, 2) == 5) .or. (n_species == 0))) then
        call die_msg(428926381, 'each line in ' // trim(file%name) &
-            // ' should contain exactly 5 values')
+            // ' should contain exactly 6 values')
     end if
 
     ! allocate and copy over the data
