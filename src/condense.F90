@@ -45,6 +45,11 @@ module pmc_condense
   !> (for debugging only).
   logical, parameter :: CONDENSE_DO_TEST_COUNTS = .false.
 
+  !> Minimum thickness of the organic film (m) for the effective
+  !> surface tension (EST) treatment. Must be consistent with the
+  !> value used in aero_particle_crit_diameter_est().
+  real(kind=dp), parameter :: CONDENSE_EST_DELTA_MIN = 1.6d-10
+
   !> Result code indicating successful completion.
   integer, parameter :: PMC_CONDENSE_SOLVER_SUCCESS        = 0
   !> Result code indicating failure to allocate \c y vector.
@@ -83,6 +88,15 @@ module pmc_condense
      real(kind=dp) :: D_dry
      !> Kappa parameter (1).
      real(kind=dp) :: kappa
+     !> Organic (shell) volume \f$V_\beta\f$ of the particle (m^3),
+     !> only used if \c condense_do_est is true.
+     real(kind=dp) :: v_org
+     !> Surface tension of the core (soluble) phase (J m^{-2}),
+     !> only used if \c condense_do_est is true.
+     real(kind=dp) :: surf_eng_core
+     !> Surface tension of the shell (organic film) phase (J m^{-2}),
+     !> only used if \c condense_do_est is true.
+     real(kind=dp) :: surf_eng_shell
   end type condense_rates_inputs_t
 
   !> Internal-use structure for storing the outputs from the
@@ -129,6 +143,19 @@ module pmc_condense
   !> Internal-use variable for storing the per-particle number
   !> concentrations during calls to the ODE solver.
   real(kind=dp), allocatable :: condense_saved_num_conc(:)
+  !> Internal-use variable for storing whether to use the effective
+  !> surface tension (EST) \f$\sigma(D)\f$ during calls to the ODE
+  !> solver.
+  logical :: condense_do_est = .false.
+  !> Internal-use variable for storing the per-particle organic
+  !> (shell) volumes during calls to the ODE solver.
+  real(kind=dp), allocatable :: condense_saved_v_org(:)
+  !> Internal-use variable for storing the per-particle core surface
+  !> tensions during calls to the ODE solver.
+  real(kind=dp), allocatable :: condense_saved_surf_eng_core(:)
+  !> Internal-use variable for storing the per-particle shell surface
+  !> tensions during calls to the ODE solver.
+  real(kind=dp), allocatable :: condense_saved_surf_eng_shell(:)
 
   !> Internal-use variable for counting calls to the vector field
   !> subroutine.
@@ -145,7 +172,7 @@ contains
   !> including updating the environment to account for the lost
   !> water vapor.
   subroutine condense_particles(aero_state, aero_data, env_state_initial, &
-       env_state_final, del_t)
+       env_state_final, del_t, do_est)
 
     !> Aerosol state.
     type(aero_state_t), intent(inout) :: aero_state
@@ -159,6 +186,9 @@ contains
     type(env_state_t), intent(inout) :: env_state_final
     !> Total time to integrate.
     real(kind=dp), intent(in) :: del_t
+    !> Whether to use the effective surface tension (EST)
+    !> \f$\sigma(D)\f$ instead of the constant water surface tension.
+    logical, intent(in) :: do_est
 
     integer :: i_part, n_eqn, i_eqn
     real(kind=dp) :: state(aero_state_n_part(aero_state) + 1)
@@ -211,11 +241,17 @@ contains
          = (env_state_final%temp - env_state_initial%temp) / del_t
     condense_saved_pdot &
          = (env_state_final%pressure - env_state_initial%pressure) / del_t
+    condense_do_est = do_est
 
     ! construct initial state vector from aero_state and env_state
     allocate(condense_saved_kappa(aero_state_n_part(aero_state)))
     allocate(condense_saved_D_dry(aero_state_n_part(aero_state)))
     allocate(condense_saved_num_conc(aero_state_n_part(aero_state)))
+    if (condense_do_est) then
+       allocate(condense_saved_v_org(aero_state_n_part(aero_state)))
+       allocate(condense_saved_surf_eng_core(aero_state_n_part(aero_state)))
+       allocate(condense_saved_surf_eng_shell(aero_state_n_part(aero_state)))
+    end if
     ! work backwards for consistency with the later number
     ! concentration adjustment, which has specific ordering
     ! requirements
@@ -233,6 +269,14 @@ contains
             aero_state%apa%particle(i_part), aero_data)
        abs_tol_vector(i_part) = max(1d-30, &
             1d-8 * (state(i_part) - condense_saved_D_dry(i_part)))
+       if (condense_do_est) then
+          call condense_est_particle_params( &
+               aero_state%apa%particle(i_part), aero_data, &
+               state(i_part), &
+               condense_saved_v_org(i_part), &
+               condense_saved_surf_eng_core(i_part), &
+               condense_saved_surf_eng_shell(i_part))
+       end if
     end do
     state(aero_state_n_part(aero_state) + 1) = env_state_initial%rel_humid
     abs_tol_vector(aero_state_n_part(aero_state) + 1) = 1d-10
@@ -321,6 +365,11 @@ contains
     deallocate(condense_saved_kappa)
     deallocate(condense_saved_D_dry)
     deallocate(condense_saved_num_conc)
+    if (allocated(condense_saved_v_org)) then
+       deallocate(condense_saved_v_org)
+       deallocate(condense_saved_surf_eng_core)
+       deallocate(condense_saved_surf_eng_shell)
+    end if
 
   end subroutine condense_particles
 
@@ -365,6 +414,165 @@ contains
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+  !> Compute the per-particle constant parameters needed to evaluate
+  !> the effective surface tension (EST) \f$\sigma(D)\f$.
+  !!
+  !! The core (soluble inorganics plus water) and shell (organic film)
+  !! surface tensions are volume-weighted averages of the per-species
+  !! values in \c aero_data%%sigma. Following the constant
+  !! \f$\Delta\sigma\f$ approximation (condense_sigmaD.tex, Sec. 2)
+  !! they are evaluated once at the given diameter \c D and then held
+  !! constant during the solve, so that the diameter dependence of
+  !! \f$\sigma(D)\f$ comes only from the film coverage
+  !! \f$V_\beta / V_\delta(D)\f$.
+  subroutine condense_est_particle_params(aero_particle, aero_data, &
+       D, v_org, surf_eng_core, surf_eng_shell)
+
+    !> Aerosol particle.
+    type(aero_particle_t), intent(in) :: aero_particle
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+    !> Wet diameter (m) at which to evaluate the core surface tension.
+    real(kind=dp), intent(in) :: D
+    !> Organic (shell) volume \f$V_\beta\f$ of the particle (m^3).
+    real(kind=dp), intent(out) :: v_org
+    !> Surface tension of the core (soluble) phase (J m^{-2}).
+    real(kind=dp), intent(out) :: surf_eng_core
+    !> Surface tension of the shell (organic film) phase (J m^{-2}).
+    real(kind=dp), intent(out) :: surf_eng_shell
+
+    real(kind=dp) :: v_sol, soluble_volume, sum_sol_sigma, v_water
+
+    v_org = aero_particle_organic_volume(aero_particle, aero_data)
+    v_sol = const%pi / 6d0 * D**3 &
+         - aero_particle_solid_volume(aero_particle, aero_data) - v_org
+    if (v_sol > 0d0) then
+       ! Soluble-core surface tension at wet diameter D. Follows the
+       ! aero_particle.F90 EST refactor (commit efedd71): resolve the
+       ! diameter-independent soluble sums (total soluble volume and
+       ! sum_i V_i sigma_i) once, then combine with the water volume.
+       ! Numerically identical to the former
+       ! aero_particle_surf_eng_soluble(), which efedd71 replaced with
+       ! aero_particle_soluble_sums() to avoid per-diameter name lookups.
+       call aero_particle_soluble_sums(aero_particle, aero_data, &
+            soluble_volume, sum_sol_sigma)
+       v_water = v_sol - soluble_volume
+       surf_eng_core = (sum_sol_sigma + v_water * const%water_surf_eng) / v_sol
+    else
+       ! no soluble material and no water, fall back to pure water
+       surf_eng_core = const%water_surf_eng
+    end if
+    if (v_org > 0d0) then
+       surf_eng_shell = aero_particle_surf_eng_organic(aero_particle, &
+            aero_data)
+    else
+       ! no organic film, sigma(D) will be the constant core value
+       surf_eng_shell = surf_eng_core
+    end if
+
+  end subroutine condense_est_particle_params
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Compute the effective surface tension (EST) \f$\sigma(D)\f$ and
+  !> the combination \f$\mathcal{R}(D) = \sigma(D) - D \sigma'(D)\f$
+  !> at the wet diameter \c D.
+  !!
+  !! This implements the core/shell coverage model of
+  !! condense_sigmaD.tex, Sec. 2. The effective surface tension is
+  !! \f[ \sigma(D) = \sigma_{\rm core}
+  !!     + \frac{V_\beta}{V_\delta(D)} \Delta\sigma, \qquad
+  !!     \Delta\sigma = \sigma_{\rm shell} - \sigma_{\rm core}, \f]
+  !! where \f$V_\beta\f$ is the organic (film) volume and
+  !! \f$V_\delta(D)\f$ is the volume of a film of thickness
+  !! \f$\delta_{\rm min}\f$ on the surface of the core (all
+  !! non-organic material, consistent with
+  !! aero_particle_crit_diameter_est()):
+  !! \f[ V_\delta(D) = \frac{4\pi}{3}
+  !!     \left[ (r_{\rm core} + \delta_{\rm min})^3
+  !!     - r_{\rm core}^3 \right], \qquad
+  !!     r_{\rm core}(D) = \left( \frac{3 V_{\rm core}(D)}{4 \pi}
+  !!     \right)^{1/3}, \qquad
+  !!     V_{\rm core}(D) = \frac{\pi}{6} D^3 - V_\beta. \f]
+  !! The derivative of \f$V_\delta\f$ follows by the chain rule
+  !! through \f$r_{\rm core}(D)\f$, with
+  !! \f$ dr_{\rm core}/dD = D^2 / (8 r_{\rm core}^2) \f$:
+  !! \f[ V_\delta'(D) = \frac{\pi \delta_{\rm min}
+  !!     (2 r_{\rm core} + \delta_{\rm min}) D^2}{2 r_{\rm core}^2},
+  !! \f]
+  !! giving
+  !! \f$ \sigma'(D) = - V_\beta \Delta\sigma V_\delta'(D)
+  !! / V_\delta(D)^2 \f$ and \f$ \mathcal{R}(D) = \sigma(D)
+  !! - D \sigma'(D) \f$ (eq. \c eq:Rfun of condense_sigmaD.tex). At
+  !! full coverage (\f$V_\beta \ge V_\delta(D)\f$) the surface tension
+  !! is \f$\sigma = \sigma_{\rm shell}\f$ with \f$\sigma' = 0\f$ and
+  !! \f$\mathcal{R} = \sigma_{\rm shell}\f$.
+  !!
+  !! \f$\sigma(D)\f$ enters the Kelvin term
+  !! \f$\mathcal{K}_i(D) = A_\kappa \sigma(D) / D\f$ of eqs. (29),
+  !! (30) and (66) of doc/condense.tex, and \f$\mathcal{R}(D)\f$
+  !! replaces the constant surface tension in the factor
+  !! \f$X / D_i^2 \to A_\kappa \mathcal{R}(D_i) / D_i^2\f$ of the
+  !! re-derived eqs. (31) and (67) (condense_sigmaD.tex, eqs.
+  !! \c eq:dhdD_new and \c eq:dgdD_new).
+  subroutine condense_est_surf_eng(D, v_org, surf_eng_core, &
+       surf_eng_shell, surf_eng, surf_eng_R)
+
+    !> Wet diameter (m) at which to evaluate the surface tension.
+    real(kind=dp), intent(in) :: D
+    !> Organic (shell) volume \f$V_\beta\f$ of the particle (m^3).
+    real(kind=dp), intent(in) :: v_org
+    !> Surface tension of the core (soluble) phase (J m^{-2}).
+    real(kind=dp), intent(in) :: surf_eng_core
+    !> Surface tension of the shell (organic film) phase (J m^{-2}).
+    real(kind=dp), intent(in) :: surf_eng_shell
+    !> Effective surface tension \f$\sigma(D)\f$ (J m^{-2}).
+    real(kind=dp), intent(out) :: surf_eng
+    !> Combination \f$\mathcal{R}(D) = \sigma(D) - D \sigma'(D)\f$
+    !> (J m^{-2}).
+    real(kind=dp), intent(out) :: surf_eng_R
+
+    real(kind=dp) :: v_core, r_core, v_delta, d_v_delta
+    real(kind=dp) :: delta_surf_eng, d_surf_eng
+
+    if (v_org <= 0d0) then
+       ! no organic film: constant core surface tension
+       surf_eng = surf_eng_core
+       surf_eng_R = surf_eng_core
+       return
+    end if
+
+    v_core = const%pi / 6d0 * D**3 - v_org
+    if (v_core > 0d0) then
+       r_core = (3d0 * v_core / (4d0 * const%pi))**(1d0 / 3d0)
+       v_delta = 4d0 * const%pi / 3d0 &
+            * ((r_core + CONDENSE_EST_DELTA_MIN)**3 - r_core**3)
+    else
+       ! particle is all organic at this diameter: fully covered
+       r_core = 0d0
+       v_delta = 0d0
+    end if
+
+    if (v_org >= v_delta) then
+       ! full coverage: constant shell surface tension
+       surf_eng = surf_eng_shell
+       surf_eng_R = surf_eng_shell
+       return
+    end if
+
+    ! partial coverage
+    delta_surf_eng = surf_eng_shell - surf_eng_core
+    surf_eng = surf_eng_core + v_org / v_delta * delta_surf_eng
+    d_v_delta = const%pi * CONDENSE_EST_DELTA_MIN &
+         * (2d0 * r_core + CONDENSE_EST_DELTA_MIN) * D**2 &
+         / (2d0 * r_core**2)
+    d_surf_eng = - v_org * delta_surf_eng * d_v_delta / v_delta**2
+    surf_eng_R = surf_eng - D * d_surf_eng
+
+  end subroutine condense_est_surf_eng
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
   !> Compute the rate of change of particle diameter and relative
   !> humidity for a single particle, together with the derivatives of
   !> the rates with respect to the input variables.
@@ -379,6 +587,7 @@ contains
     real(kind=dp) :: V, W, X, Y, Z, k_ap, dkap_dD, D_vp, dDvp_dD
     real(kind=dp) :: a_w, daw_dD, delta_star, h, dh_ddelta, dh_dD
     real(kind=dp) :: dh_dH, ddeltastar_dD, ddeltastar_dH
+    real(kind=dp) :: A_k, sigma_est, R_est, kelvin_arg, kelvin_fac
     integer :: newton_step
 
     rho_w = const%water_density
@@ -452,6 +661,25 @@ contains
     daw_dD = 3d0 * inputs%D**2 * inputs%kappa * inputs%D_dry**3 &
          / (inputs%D**3 + (inputs%kappa - 1d0) * inputs%D_dry**3)**2
 
+    ! Kelvin term value and derivative factor. With the effective
+    ! surface tension (EST), X / D_i is replaced by
+    ! \mathcal{K}_i(D_i) = A_\kappa \sigma(D_i) / D_i in eqs. (29) and
+    ! (30), and the factor X / D_i^2 in eq. (31) is replaced by
+    ! A_\kappa \mathcal{R}(D_i) / D_i^2 (condense_sigmaD.tex, eqs.
+    ! \c eq:Kfun, \c eq:dKfun and \c eq:dhdD_new). With constant
+    ! surface tension both reduce to the original X / D_i and
+    ! X / D_i^2.
+    if (condense_do_est) then
+       A_k = 4d0 * M_w / (const%univ_gas_const * inputs%T * rho_w)
+       call condense_est_surf_eng(inputs%D, inputs%v_org, &
+            inputs%surf_eng_core, inputs%surf_eng_shell, sigma_est, R_est)
+       kelvin_arg = A_k * sigma_est / inputs%D
+       kelvin_fac = A_k * R_est / inputs%D**2
+    else
+       kelvin_arg = X / inputs%D
+       kelvin_fac = X / inputs%D**2
+    end if
+
     delta_star = 0d0
     h = 0d0
     dh_ddelta = 1d0
@@ -462,13 +690,13 @@ contains
        h = k_ap * delta_star - U * V * D_vp &
             * (inputs%H - a_w / (1d0 + delta_star) &
             * exp(W * delta_star / (1d0 + delta_star) &
-            + (X / inputs%D) / (1d0 + delta_star)))
+            + kelvin_arg / (1d0 + delta_star)))
        dh_ddelta = &
             k_ap - U * V * D_vp * a_w / (1d0 + delta_star)**2 &
             * (1d0 - W / (1d0 + delta_star) &
-            + (X / inputs%D) / (1d0 + delta_star)) &
+            + kelvin_arg / (1d0 + delta_star)) &
             * exp(W * delta_star / (1d0 + delta_star) &
-            + (X / inputs%D) / (1d0 + delta_star))
+            + kelvin_arg / (1d0 + delta_star))
     end do
     call warn_assert_msg(387362320, &
          abs(h) < 1d3 * epsilon(1d0) * abs(U * V * D_vp * inputs%H), &
@@ -481,10 +709,10 @@ contains
     dh_dD = dkap_dD * delta_star &
          - U * V * dDvp_dD * inputs%H + U * V &
          * (a_w * dDvp_dD + D_vp * daw_dD &
-         - D_vp * a_w * (X / inputs%D**2) / (1d0 + delta_star)) &
+         - D_vp * a_w * kelvin_fac / (1d0 + delta_star)) &
          * (1d0 / (1d0 + delta_star)) &
          * exp((W * delta_star) / (1d0 + delta_star) &
-         + (X / inputs%D) / (1d0 + delta_star))
+         + kelvin_arg / (1d0 + delta_star))
     dh_dH = - U * V * D_vp
 
     ddeltastar_dD = - dh_dD / dh_ddelta
@@ -546,6 +774,15 @@ contains
             / (condense_saved_env_state_initial%temp * inputs%p) &
             / condense_saved_num_conc(i_part)
        inputs%kappa = condense_saved_kappa(i_part)
+       if (condense_do_est) then
+          inputs%v_org = condense_saved_v_org(i_part)
+          inputs%surf_eng_core = condense_saved_surf_eng_core(i_part)
+          inputs%surf_eng_shell = condense_saved_surf_eng_shell(i_part)
+       else
+          inputs%v_org = 0d0
+          inputs%surf_eng_core = const%water_surf_eng
+          inputs%surf_eng_shell = const%water_surf_eng
+       end if
        call condense_rates(inputs, outputs)
        state_dot(i_part) = outputs%Ddot
        Hdot = Hdot + outputs%Hdot_i
@@ -605,6 +842,15 @@ contains
             / (condense_saved_env_state_initial%temp * inputs%p) &
             / condense_saved_num_conc(i_part)
        inputs%kappa = condense_saved_kappa(i_part)
+       if (condense_do_est) then
+          inputs%v_org = condense_saved_v_org(i_part)
+          inputs%surf_eng_core = condense_saved_surf_eng_core(i_part)
+          inputs%surf_eng_shell = condense_saved_surf_eng_shell(i_part)
+       else
+          inputs%v_org = 0d0
+          inputs%surf_eng_core = const%water_surf_eng
+          inputs%surf_eng_shell = const%water_surf_eng
+       end if
        call condense_rates(inputs, outputs)
        dDdot_dD(i_part) = outputs%dDdot_dD
        dDdot_dH(i_part) = outputs%dDdot_dH
@@ -699,7 +945,7 @@ contains
 
   !> Determine the water equilibrium state of a single particle.
   subroutine condense_equilib_particle(env_state, aero_data, &
-       aero_particle)
+       aero_particle, do_est)
 
     !> Environment state.
     type(env_state_t), intent(in) :: env_state
@@ -707,8 +953,13 @@ contains
     type(aero_data_t), intent(in) :: aero_data
     !> Particle.
     type(aero_particle_t), intent(inout) :: aero_particle
+    !> Whether to use the effective surface tension (EST)
+    !> \f$\sigma(D)\f$ instead of the constant water surface tension.
+    logical, intent(in) :: do_est
 
     real(kind=dp) :: X, kappa, D_dry, D, g, dg_dD, a_w, daw_dD
+    real(kind=dp) :: A_k, v_org, surf_eng_core, surf_eng_shell
+    real(kind=dp) :: sigma_est, R_est, kelvin_arg, kelvin_fac
     integer :: newton_step
 
     X = 4d0 * const%water_molec_weight * const%water_surf_eng &
@@ -719,6 +970,15 @@ contains
          aero_particle_solute_volume(aero_particle, &
          aero_data))
 
+    if (do_est) then
+       A_k = 4d0 * const%water_molec_weight &
+            / (const%univ_gas_const * env_state%temp &
+            * const%water_density)
+       call condense_est_particle_params(aero_particle, aero_data, &
+            aero_particle_diameter(aero_particle, aero_data), &
+            v_org, surf_eng_core, surf_eng_shell)
+    end if
+
     D = D_dry
     g = 0d0
     dg_dD = 1d0
@@ -727,8 +987,24 @@ contains
        a_w = (D**3 - D_dry**3) / (D**3 + (kappa - 1d0) * D_dry**3)
        daw_dD = 3d0 * D**2 * kappa * D_dry**3 &
             / (D**3 + (kappa - 1d0) * D_dry**3)**2
-       g = env_state%rel_humid - a_w * exp(X / D)
-       dg_dD = - daw_dD * exp(X / D) + a_w * exp(X / D) * (X / D**2)
+       ! Kelvin term of eqs. (66) and (67) of doc/condense.tex. With
+       ! the effective surface tension (EST), X / D is replaced by
+       ! \mathcal{K}_i(D) = A_\kappa \sigma(D) / D and the factor
+       ! X / D^2 by A_\kappa \mathcal{R}(D) / D^2 (condense_sigmaD.tex,
+       ! eqs. \c eq:gi_new and \c eq:dgdD_new). This must use the same
+       ! sigma(D) routine as the growth function in condense_rates().
+       if (do_est) then
+          call condense_est_surf_eng(D, v_org, surf_eng_core, &
+               surf_eng_shell, sigma_est, R_est)
+          kelvin_arg = A_k * sigma_est / D
+          kelvin_fac = A_k * R_est / D**2
+       else
+          kelvin_arg = X / D
+          kelvin_fac = X / D**2
+       end if
+       g = env_state%rel_humid - a_w * exp(kelvin_arg)
+       dg_dD = - daw_dD * exp(kelvin_arg) &
+            + a_w * exp(kelvin_arg) * kelvin_fac
     end do
     call warn_assert_msg(426620001, abs(g) < 1d3 * epsilon(1d0), &
          "convergence problem in equilibration")
@@ -743,7 +1019,8 @@ contains
   !> Call condense_equilib_particle() on each particle in the aerosol
   !> to ensure that every particle has its water content in
   !> equilibrium.
-  subroutine condense_equilib_particles(env_state, aero_data, aero_state)
+  subroutine condense_equilib_particles(env_state, aero_data, aero_state, &
+       do_est)
 
     !> Environment state.
     type(env_state_t), intent(in) :: env_state
@@ -751,6 +1028,9 @@ contains
     type(aero_data_t), intent(in) :: aero_data
     !> Aerosol state.
     type(aero_state_t), intent(inout) :: aero_state
+    !> Whether to use the effective surface tension (EST)
+    !> \f$\sigma(D)\f$ instead of the constant water surface tension.
+    logical, intent(in) :: do_est
 
     integer :: i_part
     real(kind=dp) :: reweight_num_conc(aero_state_n_part(aero_state))
@@ -762,7 +1042,7 @@ contains
          reweight_num_conc)
     do i_part = aero_state_n_part(aero_state),1,-1
        call condense_equilib_particle(env_state, aero_data, &
-            aero_state%apa%particle(i_part))
+            aero_state%apa%particle(i_part), do_est)
     end do
     ! adjust particles to account for weight changes
     call aero_state_reweight(aero_state, aero_data, reweight_num_conc)

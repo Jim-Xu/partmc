@@ -89,6 +89,9 @@ module pmc_run_part
      logical :: allow_halving
      !> Whether to do condensation.
      logical :: do_condensation
+     !> Whether to use the effective surface tension (EST) in
+     !> condensation.
+     logical :: do_est
      !> Whether to do MOSAIC.
      logical :: do_mosaic
      !> Whether to compute optical properties.
@@ -338,6 +341,7 @@ contains
          + pmc_mpi_pack_size_logical(val%allow_doubling) &
          + pmc_mpi_pack_size_logical(val%allow_halving) &
          + pmc_mpi_pack_size_logical(val%do_condensation) &
+         + pmc_mpi_pack_size_logical(val%do_est) &
          + pmc_mpi_pack_size_logical(val%do_mosaic) &
          + pmc_mpi_pack_size_logical(val%do_optical) &
          + pmc_mpi_pack_size_logical(val%do_select_weighting) &
@@ -397,6 +401,7 @@ contains
     call pmc_mpi_pack_logical(buffer, position, val%allow_doubling)
     call pmc_mpi_pack_logical(buffer, position, val%allow_halving)
     call pmc_mpi_pack_logical(buffer, position, val%do_condensation)
+    call pmc_mpi_pack_logical(buffer, position, val%do_est)
     call pmc_mpi_pack_logical(buffer, position, val%do_mosaic)
     call pmc_mpi_pack_logical(buffer, position, val%do_optical)
     call pmc_mpi_pack_logical(buffer, position, val%do_select_weighting)
@@ -457,6 +462,7 @@ contains
     call pmc_mpi_unpack_logical(buffer, position, val%allow_doubling)
     call pmc_mpi_unpack_logical(buffer, position, val%allow_halving)
     call pmc_mpi_unpack_logical(buffer, position, val%do_condensation)
+    call pmc_mpi_unpack_logical(buffer, position, val%do_est)
     call pmc_mpi_unpack_logical(buffer, position, val%do_mosaic)
     call pmc_mpi_unpack_logical(buffer, position, val%do_optical)
     call pmc_mpi_unpack_logical(buffer, position, val%do_select_weighting)
@@ -676,9 +682,11 @@ contains
          "cannot use condensation, SUNDIALS support is not compiled in")
 #endif
     do_init_equilibrate = .false.
+    run_part_opt%do_est = .false.
     if (run_part_opt%do_condensation) then
        call spec_file_read_logical(file, 'do_init_equilibrate', &
             do_init_equilibrate)
+       call spec_file_read_logical(file, 'do_est', run_part_opt%do_est)
     end if
 
     call spec_file_read_logical(file, 'do_mosaic', run_part_opt%do_mosaic)
@@ -933,7 +941,7 @@ contains
 #ifdef PMC_USE_SUNDIALS
     if (run_part_opt%do_condensation) then
        call condense_particles(aero_state, aero_data, old_env_state, &
-            env_state, run_part_opt%del_t)
+            env_state, run_part_opt%del_t, run_part_opt%do_est)
     end if
 #endif
 

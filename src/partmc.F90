@@ -526,7 +526,8 @@ contains
 
 #ifdef PMC_USE_SUNDIALS
        if (do_init_equilibrate) then
-          call condense_equilib_particles(env_state, aero_data, aero_state)
+          call condense_equilib_particles(env_state, aero_data, aero_state, &
+               run_part_opt%do_est)
        end if
 #endif
 
