@@ -15,23 +15,26 @@ program process
        = "out/urban_plume"
 
   character(len=PMC_MAX_FILENAME_LEN) :: in_filename, out_filename
-  type(bin_grid_t) :: diam_grid, bc_grid, sc_grid
+  type(bin_grid_t) :: diam_grid, bc_grid, sc_grid, o_c_grid
   type(aero_data_t) :: aero_data
   type(aero_state_t) :: aero_state
   type(env_state_t) :: env_state
   integer :: ncid, index, repeat, i_index, i_repeat, n_index, n_repeat
   real(kind=dp) :: time, del_t, tot_num_conc, tot_mass_conc
+  real(kind=dp) :: tot_org_mass_conc, tot_org_carbon_mass_conc
   real(kind=dp) :: d_alpha, d_gamma, chi
   character(len=PMC_UUID_LEN) :: uuid
   real(kind=dp), allocatable :: times(:), dry_diameters(:), num_concs(:), &
        dry_masses(:), masses(:), bc_masses(:), bc_fracs(:), &
        crit_rhs(:), scs(:), num_dist(:), &
        diam_bc_dist(:,:), diam_sc_dist(:,:), &
-       crit_rhs_est(:), scs_est(:), diam_sc_est_dist(:,:)
+       crit_rhs_est(:), scs_est(:), diam_sc_est_dist(:,:), &
+       org_masses(:), org_carbon_masses(:), o_cs(:), diam_o_c_dist(:,:)
   type(stats_1d_t) :: stats_num_dist, stats_d_alpha, stats_tot_num_conc, &
-       stats_tot_mass_conc, stats_d_gamma, stats_chi
+       stats_tot_mass_conc, stats_d_gamma, stats_chi, &
+       stats_tot_org_mass_conc, stats_tot_o_c, stats_tot_om_oc
   type(stats_2d_t) :: stats_diam_bc_dist, stats_diam_sc_dist, &
-       stats_diam_sc_est_dist
+       stats_diam_sc_est_dist, stats_diam_o_c_dist
   character(len=AERO_NAME_LEN), allocatable :: mixing_state_groups(:,:)
 
   call pmc_mpi_init()
@@ -41,17 +44,26 @@ program process
   call bin_grid_make(diam_grid, BIN_GRID_TYPE_LOG, 180, 1d-9, 1d-3)
   call bin_grid_make(bc_grid, BIN_GRID_TYPE_LINEAR, 50, 0d0, 1d0)
   call bin_grid_make(sc_grid, BIN_GRID_TYPE_LOG, 50, 1d-4, 1d0)
+  call bin_grid_make(o_c_grid, BIN_GRID_TYPE_LINEAR, 70, 0d0, 1.4d0)
 
   allocate(times(n_index))
 
-  allocate(mixing_state_groups(3, 4)) ! 3 groups, max 4 species per group
-  mixing_state_groups(1,:) = ["OC    ", "BC    ", "      ", "      "]
-  mixing_state_groups(2,:) = ["API1  ", "API2  ", "LIM1  ", "LIM2  "]
-  mixing_state_groups(3,:) = ["SO4   ", "NO3   ", "NH4   ", "      "]
+  allocate(mixing_state_groups(3, 13)) ! 3 groups, max 13 species per group
+  mixing_state_groups = ""
+  ! primary carbonaceous species
+  mixing_state_groups(1,1:2) = [character(len=AERO_NAME_LEN) :: "OC", "BC"]
+  ! biogenic secondary organic species
+  mixing_state_groups(2,:) = [character(len=AERO_NAME_LEN) :: &
+       "AMT1", "AMT2", "AMT3", "AMT4", "AMT5", "AMT6", "AMTNO3", &
+       "AMTHYD", "AISO1", "AISO2", "AISO3", "ASQT", "AOLGB"]
+  ! secondary inorganic species
+  mixing_state_groups(3,1:3) = [character(len=AERO_NAME_LEN) :: &
+       "SO4", "NO3", "NH4"]
 
   scs = [ real(kind=dp) :: ] ! silence compiler warnings
   scs_est = [ real(kind=dp) :: ]
   bc_fracs = [ real(kind=dp) :: ]
+  o_cs = [ real(kind=dp) :: ]
 
   do i_index = 1,n_index
      do i_repeat = 1,n_repeat
@@ -101,6 +113,31 @@ program process
              sc_grid, scs_est, num_concs)
         call stats_2d_add(stats_diam_sc_est_dist, diam_sc_est_dist)
 
+        ! organic matter: bulk mass concentration, bulk O:C and OM:OC
+        ! (averages weighted by carbon), and the distribution of the
+        ! per-particle O:C; particles without organic carbon have O:C = 0
+        org_masses = aero_state_organic_masses(aero_state, aero_data)
+        org_carbon_masses = aero_state_organic_carbon_masses(aero_state, &
+             aero_data)
+        o_cs = aero_state_o_c(aero_state, aero_data)
+        tot_org_mass_conc = sum(org_masses * num_concs)
+        tot_org_carbon_mass_conc = sum(org_carbon_masses * num_concs)
+        call stats_1d_add_entry(stats_tot_org_mass_conc, tot_org_mass_conc, &
+             i_index)
+        if (tot_org_carbon_mass_conc > 0d0) then
+           call stats_1d_add_entry(stats_tot_o_c, &
+                sum(o_cs * org_carbon_masses * num_concs) &
+                / tot_org_carbon_mass_conc, i_index)
+           call stats_1d_add_entry(stats_tot_om_oc, &
+                tot_org_mass_conc / tot_org_carbon_mass_conc, i_index)
+        else
+           call stats_1d_add_entry(stats_tot_o_c, 0d0, i_index)
+           call stats_1d_add_entry(stats_tot_om_oc, 0d0, i_index)
+        end if
+        diam_o_c_dist = bin_grid_histogram_2d(diam_grid, dry_diameters, &
+             o_c_grid, o_cs, merge(num_concs, 0d0, org_carbon_masses > 0d0))
+        call stats_2d_add(stats_diam_o_c_dist, diam_o_c_dist)
+
         call aero_state_mixing_state_metrics(aero_state, aero_data, &
              d_alpha, d_gamma, chi, groups=mixing_state_groups)
 
@@ -117,6 +154,7 @@ program process
      call bin_grid_output_netcdf(diam_grid, ncid, "diam", unit="m")
      call bin_grid_output_netcdf(bc_grid, ncid, "bc_frac", unit="1")
      call bin_grid_output_netcdf(sc_grid, ncid, "sc", unit="1")
+     call bin_grid_output_netcdf(o_c_grid, ncid, "o_c", unit="1")
 
      call stats_1d_output_netcdf(stats_num_dist, ncid, "num_dist", &
           dim_name="diam", unit="m^{-3}")
@@ -135,6 +173,10 @@ program process
           unit="m^{-3}")
      call stats_2d_clear(stats_diam_sc_est_dist)
 
+     call stats_2d_output_netcdf(stats_diam_o_c_dist, ncid, "diam_o_c_dist", &
+          dim_name_1="diam", dim_name_2="o_c", unit="m^{-3}")
+     call stats_2d_clear(stats_diam_o_c_dist)
+
      call pmc_nc_close(ncid)
   end do
 
@@ -147,6 +189,12 @@ program process
        dim_name="time", unit="m^{-3}")
   call stats_1d_output_netcdf(stats_tot_mass_conc, ncid, "tot_mass_conc", &
        dim_name="time", unit="kg m^{-3}")
+  call stats_1d_output_netcdf(stats_tot_org_mass_conc, ncid, &
+       "tot_org_mass_conc", dim_name="time", unit="kg m^{-3}")
+  call stats_1d_output_netcdf(stats_tot_o_c, ncid, "tot_o_c", &
+       dim_name="time", unit="1")
+  call stats_1d_output_netcdf(stats_tot_om_oc, ncid, "tot_om_oc", &
+       dim_name="time", unit="1")
   call stats_1d_output_netcdf(stats_d_alpha, ncid, "d_alpha", &
        dim_name="time", unit="1")
   call stats_1d_output_netcdf(stats_d_gamma, ncid, &

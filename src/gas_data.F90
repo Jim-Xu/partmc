@@ -155,35 +155,42 @@ contains
     !> Gas data.
     type(gas_data_t), intent(inout) :: gas_data
 
-    integer, parameter :: n_mosaic_species = 77
+    ! Species in the order of the MOSAIC gas species indices: the
+    ! common mechanism, the semivolatile organic vapors of the VBS-style
+    ! SOA scheme (CMAQ AERO7 names, replacing the SORGAM species), and
+    ! the urban, biogenic and marine mechanisms. The urban and biogenic
+    ! mechanisms include the SOA precursors and SOA tracer species.
+    integer, parameter :: n_mosaic_species = 108
     character(len=GAS_NAME_LEN), parameter, dimension(n_mosaic_species) &
-         :: mosaic_species = [ &
-         "H2SO4        ", "HNO3         ", "HCl          ", &
-         "NH3          ", "NO           ", "NO2          ", &
-         "NO3          ", "N2O5         ", "HONO         ", &
-         "HNO4         ", "O3           ", "O1D          ", &
-         "O3P          ", "OH           ", "HO2          ", &
-         "H2O2         ", "CO           ", "SO2          ", &
-         "CH4          ", "C2H6         ", "CH3O2        ", &
-         "ETHP         ", "HCHO         ", "CH3OH        ", &
-         "ANOL         ", "CH3OOH       ", "ETHOOH       ", &
-         "ALD2         ", "HCOOH        ", "RCOOH        ", &
-         "C2O3         ", "PAN          ", "ARO1         ", &
-         "ARO2         ", "ALK1         ", "OLE1         ", &
-         "API1         ", "API2         ", "LIM1         ", &
-         "LIM2         ", "PAR          ", "AONE         ", &
-         "MGLY         ", "ETH          ", "OLET         ", &
-         "OLEI         ", "TOL          ", "XYL          ", &
-         "CRES         ", "TO2          ", "CRO          ", &
-         "OPEN         ", "ONIT         ", "ROOH         ", &
-         "RO2          ", "ANO2         ", "NAP          ", &
-         "XO2          ", "XPAR         ", "ISOP         ", &
-         "ISOPRD       ", "ISOPP        ", "ISOPN        ", &
-         "ISOPO2       ", "API          ", "LIM          ", &
-         "DMS          ", "MSA          ", "DMSO         ", &
-         "DMSO2        ", "CH3SO2H      ", "CH3SCH2OO    ", &
-         "CH3SO2       ", "CH3SO3       ", "CH3SO2OO     ", &
-         "CH3SO2CH2OO  ", "SULFHOX      "]
+         :: mosaic_species = [character(len=GAS_NAME_LEN) :: &
+         "H2SO4",        "HNO3",         "HCl",          "NH3", &
+         "NO",           "NO2",          "NO3",          "N2O5", &
+         "HONO",         "HNO4",         "O3",           "O1D", &
+         "O3P",          "OH",           "HO2",          "H2O2", &
+         "CO",           "SO2",          "CH4",          "C2H6", &
+         "CH3O2",        "ETHP",         "HCHO",         "CH3OH", &
+         "ANOL",         "CH3OOH",       "ETHOOH",       "ALD2", &
+         "HCOOH",        "RCOOH",        "C2O3",         "PAN", &
+         "SVAVB1",       "SVAVB2",       "SVAVB3",       "SVAVB4", &
+         "SVMT1",        "SVMT2",        "SVMT3",        "SVMT4", &
+         "SVMT5",        "SVMT6",        "MTNO3",        "SVISO1", &
+         "SVISO2",       "SVSQT",        "VLVPO1",       "VSVPO1", &
+         "VSVPO2",       "VSVPO3",       "VIVPO1",       "VLVOO1", &
+         "VLVOO2",       "VSVOO1",       "VSVOO2",       "VSVOO3", &
+         "LVPCSOG",      "PAR",          "AONE",         "MGLY", &
+         "ETH",          "OLET",         "OLEI",         "TOL", &
+         "XYL",          "CRES",         "TO2",          "CRO", &
+         "OPEN",         "ONIT",         "ROOH",         "RO2", &
+         "ANO2",         "NAP",          "XO2",          "XPAR", &
+         "BENZ",         "NAPH",         "SOAALK",       "PCVOC", &
+         "TOLRO2",       "XYLRO2",       "BENZRO2",      "PAHRO2", &
+         "SOATOL",       "SOAXYL", &
+         "ISOP",         "ISOPRD",       "ISOPP",        "ISOPN", &
+         "ISOPO2",       "API",          "LIM",          "SESQ", &
+         "TERPNRO2",     "ISPX",         "EPOX",         "DMS", &
+         "MSA",          "DMSO",         "DMSO2",        "CH3SO2H", &
+         "CH3SCH2OO",    "CH3SO2",       "CH3SO3",       "CH3SO2OO", &
+         "CH3SO2CH2OO",  "SULFHOX"]
 
     integer spec, mosaic_spec, i
 

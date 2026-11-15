@@ -1085,6 +1085,83 @@ contains
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+  !> Returns the masses of the organic matter of all particles, see
+  !> aero_particle_organic_mass().
+  function aero_state_organic_masses(aero_state, aero_data)
+
+    !> Aerosol state.
+    type(aero_state_t), intent(in) :: aero_state
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+
+    !> Return value (kg).
+    real(kind=dp) :: aero_state_organic_masses( &
+         aero_state_n_part(aero_state))
+
+    aero_state_organic_masses = aero_particle_organic_mass( &
+         aero_state%apa%particle(1:aero_state_n_part(aero_state)), aero_data)
+
+  end function aero_state_organic_masses
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Returns the organic carbon masses of all particles.
+  function aero_state_organic_carbon_masses(aero_state, aero_data)
+
+    !> Aerosol state.
+    type(aero_state_t), intent(in) :: aero_state
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+
+    !> Return value (kg).
+    real(kind=dp) :: aero_state_organic_carbon_masses( &
+         aero_state_n_part(aero_state))
+
+    aero_state_organic_carbon_masses = aero_particle_organic_carbon_mass( &
+         aero_state%apa%particle(1:aero_state_n_part(aero_state)), aero_data)
+
+  end function aero_state_organic_carbon_masses
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Returns the average atomic oxygen-to-carbon ratios O:C of the
+  !> organic matter of all particles, see aero_particle_o_c().
+  function aero_state_o_c(aero_state, aero_data)
+
+    !> Aerosol state.
+    type(aero_state_t), intent(in) :: aero_state
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+
+    !> Return value (1).
+    real(kind=dp) :: aero_state_o_c(aero_state_n_part(aero_state))
+
+    aero_state_o_c = aero_particle_o_c( &
+         aero_state%apa%particle(1:aero_state_n_part(aero_state)), aero_data)
+
+  end function aero_state_o_c
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Returns the ratios of organic mass to organic carbon mass OM:OC of
+  !> the organic matter of all particles, see aero_particle_om_oc().
+  function aero_state_om_oc(aero_state, aero_data)
+
+    !> Aerosol state.
+    type(aero_state_t), intent(in) :: aero_state
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+
+    !> Return value (1).
+    real(kind=dp) :: aero_state_om_oc(aero_state_n_part(aero_state))
+
+    aero_state_om_oc = aero_particle_om_oc( &
+         aero_state%apa%particle(1:aero_state_n_part(aero_state)), aero_data)
+
+  end function aero_state_om_oc
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
   !> Returns the mobility diameters of all particles.
   function aero_state_mobility_diameters(aero_state, aero_data, env_state)
 

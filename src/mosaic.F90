@@ -45,6 +45,8 @@ contains
          zalt_m, RH, te, pr_atm, cair_mlc, cair_molm3, ppb, avogad, &
          mmode, mgas, maer, mcld, maeroptic, mshellcore, &
          msolar, mphoto, lun_aeroptic, naerbin
+
+    use module_data_mosaic_soa, only: nsoa, soa_name_a, soa_mw
 #endif
 
     !> Environment state.
@@ -57,6 +59,8 @@ contains
     logical, intent(in) :: do_optical
 
 #ifdef PMC_USE_MOSAIC
+    integer :: i_soa, i_spec
+
     ! MOSAIC function interfaces
     interface
        subroutine LoadPeroxyParameters()
@@ -119,6 +123,22 @@ contains
     ! ensure H2O is a valid species
     call assert_msg(111041803, aero_data%i_water > 0, &
          "MOSAIC requires H2O as an aerosol species")
+
+    ! the saturation concentrations of the organic species are given per
+    ! mass and are converted to moles with the MOSAIC molecular weights,
+    ! so the molecular weights in aero_data must be the same
+    do i_soa = 1,nsoa
+       i_spec = aero_data_spec_by_name(aero_data, trim(soa_name_a(i_soa)))
+       if (i_spec > 0) then
+          call assert_msg(280416507, almost_equal( &
+               aero_data%molec_weight(i_spec), soa_mw(i_soa) * 1d-3), &
+               "molecular weight of aerosol species " &
+               // trim(aero_data%name(i_spec)) // " (" &
+               // trim(real_to_string(aero_data%molec_weight(i_spec))) &
+               // " kg/mol) differs from the MOSAIC value (" &
+               // trim(real_to_string(soa_mw(i_soa) * 1d-3)) // " kg/mol)")
+       end if
+    end do
 
 #endif
 

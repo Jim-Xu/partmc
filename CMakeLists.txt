@@ -225,6 +225,7 @@ if(ENABLE_MOSAIC)
   add_test(test_mosaic ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh mosaic)
 endif()
 add_test(test_nucleate ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh nucleate)
+add_test(test_organics ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh organics)
 if(ENABLE_MPI)
   add_test(test_parallel ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh parallel)
 endif()
@@ -384,6 +385,14 @@ add_executable(test_mixing_state_process
 target_link_libraries(test_mixing_state_process partmclib)
 
 ######################################################################
+# test_organics_process
+
+add_executable(test_organics_process
+  test/organics/test_organics_process.F90)
+
+target_link_libraries(test_organics_process partmclib)
+
+######################################################################
 # bin_average_comp
 
 add_executable(bin_average_comp src/bin_average_comp.F90)
@@ -457,5 +466,12 @@ target_link_libraries(chamber_process partmclib)
 add_executable(drydep_modal_process
   scenarios/7_drydep/drydep_modal_process.F90)
 target_link_libraries(drydep_modal_process partmclib)
+
+######################################################################
+# scenarios/8_organics/organics_process
+
+add_executable(organics_process
+  scenarios/8_organics/organics_process.F90)
+target_link_libraries(organics_process partmclib)
 
 ######################################################################

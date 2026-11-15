@@ -34,6 +34,23 @@ module pmc_aero_data
   integer, parameter :: n_swbands = 1
 #endif
 
+  !> Names of the species that are treated as organic material.
+  !!
+  !! These are MSA, the species of the former SORGAM scheme (kept so that
+  !! older species data files are still interpreted correctly), the
+  !! primary organic carbon OC, and the organic species of the VBS-style
+  !! SOA scheme in MOSAIC (CMAQ AERO7 names).
+  character(len=AERO_NAME_LEN), parameter :: AERO_ORGANIC_SPEC_NAME(40) = &
+       [character(len=AERO_NAME_LEN) :: &
+       "MSA",    "ARO1",   "ARO2",   "ALK1",   "OLE1", &
+       "API1",   "API2",   "LIM1",   "LIM2",   "OC", &
+       "AAVB1",  "AAVB2",  "AAVB3",  "AAVB4",  "AMT1", &
+       "AMT2",   "AMT3",   "AMT4",   "AMT5",   "AMT6", &
+       "AMTNO3", "AISO1",  "AISO2",  "ASQT",   "ALVPO1", &
+       "ASVPO1", "ASVPO2", "ASVPO3", "AIVPO1", "ALVOO1", &
+       "ALVOO2", "ASVOO1", "ASVOO2", "ASVOO3", "APCSO", &
+       "AOLGA",  "AOLGB",  "AMTHYD", "AISO3",  "AGLY"]
+
   !> Aerosol material properties and associated data.
   !!
   !! The data in this structure is constant, as it represents physical
@@ -51,7 +68,8 @@ module pmc_aero_data
   !! only the material properties are used. The names are used for
   !! input and output, and also for communication with MOSAIC. For the
   !! MOSAIC interface to work correctly the species must be named the
-  !! same, but without the \c _a suffix.
+  !! same, but without the \c _a suffix. The organic species use the
+  !! names of the VBS-style SOA scheme, see aero_data_set_mosaic_map().
   type aero_data_t
      !> Water species number (0 if water is not a species).
      integer :: i_water
@@ -76,6 +94,14 @@ module pmc_aero_data
      real(kind=dp), allocatable :: abifm_c(:)
      !> Length \c aero_data_n_spec(aero_data), sigma (J m-2).
      real(kind=dp), allocatable :: sigma(:)
+     !> Length \c aero_data_n_spec(aero_data), atomic oxygen-to-carbon
+     !> ratios O:C of the species (1). Only meaningful where \c om_oc is
+     !> positive.
+     real(kind=dp), allocatable :: o_c(:)
+     !> Length \c aero_data_n_spec(aero_data), ratios of organic mass to
+     !> organic carbon mass OM:OC of the species (1), or 0 for species
+     !> that contain no organic carbon.
+     real(kind=dp), allocatable :: om_oc(:)
      !> Length \c aero_data_n_source(aero_data), source names.
      character(len=AERO_SOURCE_NAME_LEN), allocatable :: source_name(:)
      !> Length \c aero_data_n_weight_classes, weight class names.
@@ -393,13 +419,23 @@ contains
     !> Aero_data data.
     type(aero_data_t), intent(inout) :: aero_data
 
-    integer, parameter :: n_mosaic_spec = 19
+    ! Species in the order of the MOSAIC aerosol species indices: the
+    ! inorganic semivolatile species, the semivolatile organic species,
+    ! the nonvolatile inorganic and primary species, and the nonvolatile
+    ! organic species. The organic species are those of the VBS-style
+    ! SOA scheme (CMAQ AERO7 names), which replaced the SORGAM species.
+    integer, parameter :: n_mosaic_spec = 41
     character(AERO_NAME_LEN), parameter, dimension(n_mosaic_spec) :: &
-         mosaic_spec_name = [ &
-         "SO4   ", "NO3   ", "Cl    ", "NH4   ", "MSA   ", "ARO1  ", &
-         "ARO2  ", "ALK1  ", "OLE1  ", "API1  ", "API2  ", "LIM1  ", &
-         "LIM2  ", "CO3   ", "Na    ", "Ca    ", "OIN   ", "OC    ", &
-         "BC    "]
+         mosaic_spec_name = [character(len=AERO_NAME_LEN) :: &
+         "SO4",    "NO3",    "Cl",     "NH4",    "MSA", &
+         "AAVB1",  "AAVB2",  "AAVB3",  "AAVB4",  "AMT1", &
+         "AMT2",   "AMT3",   "AMT4",   "AMT5",   "AMT6", &
+         "AMTNO3", "AISO1",  "AISO2",  "ASQT",   "ALVPO1", &
+         "ASVPO1", "ASVPO2", "ASVPO3", "AIVPO1", "ALVOO1", &
+         "ALVOO2", "ASVOO1", "ASVOO2", "ASVOO3", "APCSO", &
+         "CO3",    "Na",     "Ca",     "OIN",    "OC", &
+         "BC",     "AOLGA",  "AOLGB",  "AMTHYD", "AISO3", &
+         "AGLY"]
 
     integer :: i_spec, i_mosaic_spec, i
 
@@ -463,6 +499,18 @@ contains
     !!     zero, then inferred from the ions value
     !!   - abifm_m: The m parameter for ABIFM algorithm
     !!   - abifm_c: The c parameter for ABIFM algorithm
+    !!   - surface tension (real, unit J/m^2)
+    !!   - O:C (real, dimensionless, optional) - atomic oxygen-to-carbon
+    !!     ratio of an organic species
+    !!   - OM:OC (real, dimensionless, optional) - ratio of organic mass
+    !!     to organic carbon mass of an organic species, or zero for a
+    !!     species that contains no organic carbon
+    !!
+    !! The last two values are optional, but must be given either for
+    !! all species or for none. If they are absent then no species
+    !! counts as organic carbon. They are used to compute the average
+    !! O:C and OM:OC of the organic matter of each particle, see
+    !! aero_particle_o_c() and aero_particle_om_oc().
     !!
     !! This specifies both which species are to be recognized as
     !! aerosol consituents, as well as their physical properties. For
@@ -489,9 +537,10 @@ contains
 
     ! check the data size
     n_species = size(species_data, 1)
-    if (.not. ((size(species_data, 2) == 7) .or. (n_species == 0))) then
+    if (.not. ((size(species_data, 2) == 7) &
+         .or. (size(species_data, 2) == 9) .or. (n_species == 0))) then
        call die_msg(428926381, 'each line in ' // trim(file%name) &
-            // ' should contain exactly 8 values')
+            // ' should contain exactly 8 or 10 values')
     end if
 
     ! allocate and copy over the data
@@ -505,6 +554,8 @@ contains
     call ensure_real_array_size(aero_data%abifm_m, n_species)
     call ensure_real_array_size(aero_data%abifm_c, n_species)
     call ensure_real_array_size(aero_data%sigma, n_species)
+    call ensure_real_array_size(aero_data%o_c, n_species)
+    call ensure_real_array_size(aero_data%om_oc, n_species)
     do i = 1,n_species
        aero_data%name(i) = species_name(i)(1:AERO_NAME_LEN)
        aero_data%density(i) = species_data(i,1)
@@ -514,6 +565,20 @@ contains
        aero_data%abifm_m(i) = species_data(i,5)
        aero_data%abifm_c(i) = species_data(i,6)
        aero_data%sigma(i) = species_data(i,7)
+       if (size(species_data, 2) == 9) then
+          aero_data%o_c(i) = species_data(i,8)
+          aero_data%om_oc(i) = species_data(i,9)
+       else
+          ! no organic carbon information given
+          aero_data%o_c(i) = 0d0
+          aero_data%om_oc(i) = 0d0
+       end if
+       call assert_msg(609285217, (aero_data%o_c(i) >= 0d0) &
+            .and. ((aero_data%om_oc(i) == 0d0) &
+            .or. (aero_data%om_oc(i) >= 1d0)), &
+            "O:C must be non-negative and OM:OC must be zero or at " &
+            // "least one for species " // trim(aero_data%name(i)) &
+            // " in " // trim(file%name))
        call assert_msg(232362742, &
             (aero_data%num_ions(i) == 0) .or. (aero_data%kappa(i) == 0d0), &
             "ions and kappa both non-zero for species " &
@@ -589,6 +654,8 @@ contains
          + pmc_mpi_pack_size_real_array(val%abifm_m) &
          + pmc_mpi_pack_size_real_array(val%abifm_c) &
          + pmc_mpi_pack_size_real_array(val%sigma) &
+         + pmc_mpi_pack_size_real_array(val%o_c) &
+         + pmc_mpi_pack_size_real_array(val%om_oc) &
          + pmc_mpi_pack_size_string_array(val%source_name) &
          + pmc_mpi_pack_size_string_array(val%weight_class_name) &
          + pmc_mpi_pack_size_fractal(val%fractal)
@@ -622,6 +689,8 @@ contains
     call pmc_mpi_pack_real_array(buffer, position, val%abifm_m)
     call pmc_mpi_pack_real_array(buffer, position, val%abifm_c)
     call pmc_mpi_pack_real_array(buffer, position, val%sigma)
+    call pmc_mpi_pack_real_array(buffer, position, val%o_c)
+    call pmc_mpi_pack_real_array(buffer, position, val%om_oc)
     call pmc_mpi_pack_string_array(buffer, position, val%source_name)
     call pmc_mpi_pack_string_array(buffer, position, val%weight_class_name)
     call pmc_mpi_pack_fractal(buffer, position, val%fractal)
@@ -658,6 +727,8 @@ contains
     call pmc_mpi_unpack_real_array(buffer, position, val%abifm_m)
     call pmc_mpi_unpack_real_array(buffer, position, val%abifm_c)
     call pmc_mpi_unpack_real_array(buffer, position, val%sigma)
+    call pmc_mpi_unpack_real_array(buffer, position, val%o_c)
+    call pmc_mpi_unpack_real_array(buffer, position, val%om_oc)
     call pmc_mpi_unpack_string_array(buffer, position, val%source_name)
     call pmc_mpi_unpack_string_array(buffer, position, val%weight_class_name)
     call pmc_mpi_unpack_fractal(buffer, position, val%fractal)
@@ -911,6 +982,11 @@ contains
     !!     parameters of aerosol species
     !!   - \b aero_abifm_m (dim \c aero_species): m parameter of ABIFM
     !!   - \b aero_abifm_c (dim \c aero_species): c parameter of ABIFM
+    !!   - \b aero_o_c (dim \c aero_species): atomic oxygen-to-carbon
+    !!     ratios of aerosol species
+    !!   - \b aero_om_oc (dim \c aero_species): ratios of organic mass to
+    !!     organic carbon mass of aerosol species, or 0 for species without
+    !!     organic carbon
     !!   - \b fractal parameters, see \ref output_format_fractal
     !!
     !! See also:
@@ -952,6 +1028,13 @@ contains
     call pmc_nc_write_real_1d(ncid, aero_data%sigma, &
          "aero_sigma", (/ dimid_aero_species /), unit="J/m2", &
          long_name="surface tension (sigma) of aerosol species")
+    call pmc_nc_write_real_1d(ncid, aero_data%o_c, &
+         "aero_o_c", (/ dimid_aero_species /), unit="1", &
+         long_name="atomic oxygen-to-carbon ratios of aerosol species")
+    call pmc_nc_write_real_1d(ncid, aero_data%om_oc, &
+         "aero_om_oc", (/ dimid_aero_species /), unit="1", &
+         long_name="ratios of organic mass to organic carbon mass of " &
+         // "aerosol species (0 if no organic carbon)")
     call pmc_nc_write_integer(ncid, aero_data%i_water, &
          "aero_i_water", long_name="Index of aerosol water or " &
          // "0 if water does not exist.")
@@ -1011,6 +1094,19 @@ contains
        ! value, reproducing the earlier constant-surface-tension behaviour.
        call ensure_real_array_size(aero_data%sigma, size(aero_data%density))
        aero_data%sigma = const%water_surf_eng
+    end if
+    call pmc_nc_read_real_1d(ncid, aero_data%o_c, "aero_o_c", &
+         must_be_present=.false.)
+    call pmc_nc_read_real_1d(ncid, aero_data%om_oc, "aero_om_oc", &
+         must_be_present=.false.)
+    if ((size(aero_data%o_c) == 0) .or. (size(aero_data%om_oc) == 0)) then
+       ! Backward compatibility: files written before the organic carbon
+       ! properties were added have no aero_o_c and aero_om_oc variables.
+       ! No species counts as organic carbon then.
+       call ensure_real_array_size(aero_data%o_c, size(aero_data%density))
+       call ensure_real_array_size(aero_data%om_oc, size(aero_data%density))
+       aero_data%o_c = 0d0
+       aero_data%om_oc = 0d0
     end if
 
     call pmc_nc_check(nf90_inq_varid(ncid, "aero_species", &
@@ -1138,7 +1234,13 @@ contains
     allocate(aero_data%abifm_m(num_spec))
     allocate(aero_data%abifm_c(num_spec))
     allocate(aero_data%sigma(num_spec))
+    allocate(aero_data%o_c(num_spec))
+    allocate(aero_data%om_oc(num_spec))
     allocate(aero_data%camp_particle_spec_id(num_spec))
+
+    ! No organic carbon information from CAMP
+    aero_data%o_c = 0d0
+    aero_data%om_oc = 0d0
 
     ! Assume no aerosol water
     aero_data%i_water = 0

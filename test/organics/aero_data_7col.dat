@@ -1,0 +1,5 @@
+#     dens (kg/m^3)   ions in soln (1)    molec wght (kg/mole)   kappa (1)   abifm_m (1)  abifm_c (1)   surface tension (J m^{-2})
+A              1800                0                   100d-3     0.5                  0            0     0.07
+B              1000                0                   100d-3     0.01                 0            0     0.03
+C              1400                0                   100d-3     0.1                  0            0     0.03
+D              1800                0                   100d-3     0                    0            0     0

@@ -1220,14 +1220,12 @@ contains
     !> Aerosol data.
     type(aero_data_t), intent(in) :: aero_data
     integer :: i_org_spec, i_spec
-    character(len=AERO_NAME_LEN), parameter, dimension(10) :: &
-    org_spec = ["MSA   ", "ARO1  ", "ARO2  ", "ALK1  ", "OLE1  ", &
-                "API1  ", "API2  ", "LIM1  ", "LIM2  ", "OC    "]
 
     aero_particle_organic_volume = 0d0
 
-    do i_org_spec = 1, size(org_spec)
-       i_spec = aero_data_spec_by_name(aero_data, org_spec(i_org_spec))
+    do i_org_spec = 1, size(AERO_ORGANIC_SPEC_NAME)
+       i_spec = aero_data_spec_by_name(aero_data, &
+            AERO_ORGANIC_SPEC_NAME(i_org_spec))
        ! aero_data_spec_by_name returns 0 for a name absent from aero_data;
        ! skip it rather than indexing vol(0) out of bounds.
        if (i_spec > 0) then
@@ -1237,6 +1235,98 @@ contains
     end do
 
   end function aero_particle_organic_volume
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Mass of the organic matter of the particle (kg), which is the
+  !> total mass of the species with a positive \c aero_data%om_oc.
+  elemental real(kind=dp) function aero_particle_organic_mass( &
+       aero_particle, aero_data)
+
+    !> Particle.
+    type(aero_particle_t), intent(in) :: aero_particle
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+
+    aero_particle_organic_mass = sum(aero_particle%vol * aero_data%density, &
+         mask=(aero_data%om_oc > 0d0))
+
+  end function aero_particle_organic_mass
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Mass of the organic carbon of the particle (kg). Every species
+  !> with a positive \c aero_data%om_oc contributes its mass divided by
+  !> its OM:OC.
+  elemental real(kind=dp) function aero_particle_organic_carbon_mass( &
+       aero_particle, aero_data)
+
+    !> Particle.
+    type(aero_particle_t), intent(in) :: aero_particle
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+
+    aero_particle_organic_carbon_mass = sum(aero_particle%vol &
+         * aero_data%density / aero_data%om_oc, mask=(aero_data%om_oc > 0d0))
+
+  end function aero_particle_organic_carbon_mass
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Average atomic oxygen-to-carbon ratio O:C of the organic matter of
+  !> the particle (1), or 0 for a particle without organic carbon.
+  !!
+  !! The species are averaged with their moles of carbon as weights. As
+  !! the carbon mass of a species is its mass divided by its OM:OC,
+  !! \f[ \mbox{O:C} = \frac{\sum_i (m_i / \mbox{OM:OC}_i) \,
+  !!      \mbox{O:C}_i}{\sum_i m_i / \mbox{OM:OC}_i} \f]
+  !! where the sums are over the species with a positive
+  !! \c aero_data%om_oc and \f$m_i\f$ is the mass of species \f$i\f$.
+  elemental real(kind=dp) function aero_particle_o_c(aero_particle, &
+       aero_data)
+
+    !> Particle.
+    type(aero_particle_t), intent(in) :: aero_particle
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+
+    real(kind=dp) :: carbon_mass
+
+    carbon_mass = aero_particle_organic_carbon_mass(aero_particle, aero_data)
+    if (carbon_mass > 0d0) then
+       aero_particle_o_c = sum(aero_particle%vol * aero_data%density &
+            / aero_data%om_oc * aero_data%o_c, &
+            mask=(aero_data%om_oc > 0d0)) / carbon_mass
+    else
+       aero_particle_o_c = 0d0
+    end if
+
+  end function aero_particle_o_c
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Ratio of organic mass to organic carbon mass OM:OC of the organic
+  !> matter of the particle (1), or 0 for a particle without organic
+  !> carbon.
+  elemental real(kind=dp) function aero_particle_om_oc(aero_particle, &
+       aero_data)
+
+    !> Particle.
+    type(aero_particle_t), intent(in) :: aero_particle
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+
+    real(kind=dp) :: carbon_mass
+
+    carbon_mass = aero_particle_organic_carbon_mass(aero_particle, aero_data)
+    if (carbon_mass > 0d0) then
+       aero_particle_om_oc = aero_particle_organic_mass(aero_particle, &
+            aero_data) / carbon_mass
+    else
+       aero_particle_om_oc = 0d0
+    end if
+
+  end function aero_particle_om_oc
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   !> Total solid (insoluble) volume in the particle (m^3).
@@ -1313,9 +1403,6 @@ contains
 
     real(kind=dp) :: org_volume
     integer :: i_org_spec, i_spec
-    character(len=AERO_NAME_LEN), parameter, dimension(10) :: &
-    org_spec = ["MSA   ", "ARO1  ", "ARO2  ", "ALK1  ", "OLE1  ", &
-                "API1  ", "API2  ", "LIM1  ", "LIM2  ", "OC    "]
 
     org_volume = aero_particle_organic_volume(aero_particle, aero_data)
     aero_particle_surf_eng_organic = 0d0
@@ -1327,8 +1414,9 @@ contains
        return
     end if
 
-    do i_org_spec = 1, size(org_spec)
-      i_spec = aero_data_spec_by_name(aero_data, org_spec(i_org_spec))
+    do i_org_spec = 1, size(AERO_ORGANIC_SPEC_NAME)
+      i_spec = aero_data_spec_by_name(aero_data, &
+           AERO_ORGANIC_SPEC_NAME(i_org_spec))
       if (i_spec > 0) then
         aero_particle_surf_eng_organic = aero_particle_surf_eng_organic &
                 + aero_particle%vol(i_spec) * &

@@ -8,4 +8,7 @@ set -v
 cd ${0%/*}
 
 ../../extract_gas out/mosaic_0001
-../../numeric_diff --by row --rel-tol 1e-4 ref_mosaic_0001_gas.txt out/mosaic_0001_gas.txt
+# The gas phase depends on the aerosol surface area (reactive uptake of
+# organic gases), and hence on the randomly sampled number of
+# particles, so the tolerance is much larger than without uptake.
+../../numeric_diff --by row --rel-tol 5e-3 ref_mosaic_0001_gas.txt out/mosaic_0001_gas.txt
