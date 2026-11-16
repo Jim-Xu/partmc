@@ -15,7 +15,26 @@ module pmc_mosaic
   use pmc_gas_data
   use pmc_gas_state
   use pmc_output
+  use pmc_spec_file
   use pmc_util
+
+  !> Number of photolysis reactions of MOSAIC.
+  integer, parameter :: MOSAIC_N_PHOTOLYSIS = 20
+  !> Length of the names of the photolysis reactions.
+  integer, parameter :: MOSAIC_PHOTOLYSIS_NAME_LEN = 10
+  !> Names of the photolysis reactions of MOSAIC, in the order of the
+  !> rates in the \c photolysis_rates argument of mosaic_init().
+  !!
+  !! Ozone and formaldehyde have two channels each: \c O3_O3P and \c
+  !! O3_O1D give O(3P) and O(1D), \c HCHO_R gives the radicals (2 HO2
+  !! + CO) and \c HCHO_M the molecular products (CO + H2).
+  character(len=MOSAIC_PHOTOLYSIS_NAME_LEN), parameter :: &
+       MOSAIC_PHOTOLYSIS_NAME(MOSAIC_N_PHOTOLYSIS) = &
+       [character(len=MOSAIC_PHOTOLYSIS_NAME_LEN) :: &
+       "NO2",    "NO3",    "HONO",   "HNO3",   "HNO4", &
+       "N2O5",   "O3_O3P", "O3_O1D", "H2O2",   "HCHO_R", &
+       "HCHO_M", "CH3OOH", "ETHOOH", "ALD2",   "AONE", &
+       "MGLY",   "OPEN",   "ROOH",   "ONIT",   "ISOPRD"]
 
 contains
 
@@ -35,7 +54,8 @@ contains
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   !> Initialize all MOSAIC data-structures.
-  subroutine mosaic_init(env_state, aero_data, del_t, do_optical)
+  subroutine mosaic_init(env_state, aero_data, del_t, do_optical, &
+       photolysis_rates)
 
 #ifdef PMC_USE_MOSAIC
     use module_data_mosaic_aero, only: alpha_ASTEM, rtol_eqb_ASTEM, &
@@ -45,6 +65,13 @@ contains
          zalt_m, RH, te, pr_atm, cair_mlc, cair_molm3, ppb, avogad, &
          mmode, mgas, maer, mcld, maeroptic, mshellcore, &
          msolar, mphoto, lun_aeroptic, naerbin
+
+    use module_data_mosaic_gas, only: nphoto, rk_photo_fixed, &
+         jphoto_no2, jphoto_no3, jphoto_hono, jphoto_hno3, jphoto_hno4, &
+         jphoto_n2o5, jphoto_o3a, jphoto_o3b, jphoto_h2o2, jphoto_hchoa, &
+         jphoto_hchob, jphoto_ch3ooh, jphoto_ethooh, jphoto_ald2, &
+         jphoto_aone, jphoto_mgly, jphoto_open, jphoto_rooh, jphoto_onit, &
+         jphoto_isoprd
 
     use module_data_mosaic_soa, only: nsoa, soa_name_a, soa_mw
 #endif
@@ -57,6 +84,11 @@ contains
     real(kind=dp), intent(in) :: del_t
     !> Whether to compute optical properties.
     logical, intent(in) :: do_optical
+    !> Fixed photolysis rates (s^{-1}) in the order of
+    !> MOSAIC_PHOTOLYSIS_NAME, as in a chamber with artificial
+    !> light. If not present, the rates follow the solar zenith angle.
+    real(kind=dp), intent(in), optional :: &
+         photolysis_rates(MOSAIC_N_PHOTOLYSIS)
 
 #ifdef PMC_USE_MOSAIC
     integer :: i_soa, i_spec
@@ -89,7 +121,32 @@ contains
     end if
     mshellcore = 1          ! 0 = no shellcore, 1 = core is BC only
                             ! 2 = core is BC and DUST
-    msolar = 1              ! 1 = diurnally varying phot, 2 = fixed phot
+    if (present(photolysis_rates)) then
+       msolar = 2           ! 1 = diurnally varying phot, 2 = fixed phot
+       call assert(742360195, nphoto == MOSAIC_N_PHOTOLYSIS)
+       rk_photo_fixed(jphoto_no2) = photolysis_rates(1)
+       rk_photo_fixed(jphoto_no3) = photolysis_rates(2)
+       rk_photo_fixed(jphoto_hono) = photolysis_rates(3)
+       rk_photo_fixed(jphoto_hno3) = photolysis_rates(4)
+       rk_photo_fixed(jphoto_hno4) = photolysis_rates(5)
+       rk_photo_fixed(jphoto_n2o5) = photolysis_rates(6)
+       rk_photo_fixed(jphoto_o3a) = photolysis_rates(7)
+       rk_photo_fixed(jphoto_o3b) = photolysis_rates(8)
+       rk_photo_fixed(jphoto_h2o2) = photolysis_rates(9)
+       rk_photo_fixed(jphoto_hchoa) = photolysis_rates(10)
+       rk_photo_fixed(jphoto_hchob) = photolysis_rates(11)
+       rk_photo_fixed(jphoto_ch3ooh) = photolysis_rates(12)
+       rk_photo_fixed(jphoto_ethooh) = photolysis_rates(13)
+       rk_photo_fixed(jphoto_ald2) = photolysis_rates(14)
+       rk_photo_fixed(jphoto_aone) = photolysis_rates(15)
+       rk_photo_fixed(jphoto_mgly) = photolysis_rates(16)
+       rk_photo_fixed(jphoto_open) = photolysis_rates(17)
+       rk_photo_fixed(jphoto_rooh) = photolysis_rates(18)
+       rk_photo_fixed(jphoto_onit) = photolysis_rates(19)
+       rk_photo_fixed(jphoto_isoprd) = photolysis_rates(20)
+    else
+       msolar = 1
+    end if
     mphoto = 2              ! 1 = Rick's param, 2 = Yang's param
     mGAS_AER_XFER = 1       ! 1 = gas-aerosol partitioning, 0 = no partition
     mDYNAMIC_SOLVER = 1     ! 1 = astem, 2 = lsodes
@@ -143,6 +200,78 @@ contains
 #endif
 
   end subroutine mosaic_init
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Read the fixed photolysis rates of MOSAIC from the file.
+  subroutine spec_file_read_mosaic_photolysis(file, photolysis_rates)
+
+    !> File to read the rates from.
+    type(spec_file_t), intent(inout) :: file
+    !> Photolysis rates (s^{-1}) in the order of MOSAIC_PHOTOLYSIS_NAME.
+    real(kind=dp), allocatable, intent(inout) :: photolysis_rates(:)
+
+    integer :: n_line, i_line, i_reaction
+    character(len=SPEC_LINE_MAX_VAR_LEN), allocatable :: reaction_name(:)
+    real(kind=dp), allocatable :: reaction_data(:,:)
+
+    !> \page input_format_mosaic_photolysis Input File Format: MOSAIC Photolysis
+    !!
+    !! A file with fixed photolysis rates describes artificial light
+    !! that does not change with time, as in a chamber experiment. It
+    !! must consist of one line per photolysis reaction, with each line
+    !! having the reaction name followed by the photolysis rate in
+    !! s^{-1}. The valid reaction names are those of the
+    !! photolyzed species of MOSAIC: \c NO2, \c NO3, \c HONO, \c HNO3,
+    !! \c HNO4, \c N2O5, \c O3_O3P, \c O3_O1D, \c H2O2, \c HCHO_R,
+    !! \c HCHO_M, \c CH3OOH, \c ETHOOH, \c ALD2, \c AONE, \c MGLY,
+    !! \c OPEN, \c ROOH, \c ONIT and \c ISOPRD. Ozone and formaldehyde
+    !! have two channels each: \c O3_O3P and \c O3_O1D give O(3P) and
+    !! O(1D), \c HCHO_R gives the radical products (2 HO2 + CO) and \c
+    !! HCHO_M the molecular products (CO + H2). Not all reactions have
+    !! to be listed. Any missing reactions will have rates of zero. For
+    !! example, a photolysis rate file could contain:
+    !! <pre>
+    !! # reaction  rate (s^{-1})
+    !! NO2         5.0e-3
+    !! HONO        1.1e-3
+    !! H2O2        2.9e-6
+    !! </pre>
+    !!
+    !! See also:
+    !!   - \ref spec_file_format --- the input file text format
+
+    call spec_file_read_real_named_array(file, 0, reaction_name, &
+         reaction_data)
+
+    ! check the data size
+    n_line = size(reaction_data, 1)
+    if (.not. ((size(reaction_data, 2) == 1) .or. (n_line == 0))) then
+       call die_msg(473826501, 'each line in ' // trim(file%name) &
+            // ' must contain exactly one data value')
+    end if
+
+    ! copy over the data
+    if (allocated(photolysis_rates)) deallocate(photolysis_rates)
+    allocate(photolysis_rates(MOSAIC_N_PHOTOLYSIS))
+    photolysis_rates = 0d0
+    do i_line = 1,n_line
+       i_reaction = string_array_find(MOSAIC_PHOTOLYSIS_NAME, &
+            reaction_name(i_line))
+       if (i_reaction == 0) then
+          call die_msg(605719284, 'unknown photolysis reaction ' // &
+               trim(reaction_name(i_line)) // ' in file ' &
+               // trim(file%name))
+       end if
+       if (reaction_data(i_line,1) < 0d0) then
+          call die_msg(318840657, 'negative photolysis rate of ' // &
+               trim(reaction_name(i_line)) // ' in file ' &
+               // trim(file%name))
+       end if
+       photolysis_rates(i_reaction) = reaction_data(i_line,1)
+    end do
+
+  end subroutine spec_file_read_mosaic_photolysis
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 

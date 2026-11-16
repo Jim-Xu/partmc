@@ -96,6 +96,11 @@ module pmc_run_part
      logical :: do_mosaic
      !> Whether to compute optical properties.
      logical :: do_optical
+     !> Whether MOSAIC uses fixed photolysis rates.
+     logical :: do_fixed_photolysis
+     !> Fixed photolysis rates of MOSAIC (s^{-1}), see
+     !> MOSAIC_PHOTOLYSIS_NAME.
+     real(kind=dp), allocatable :: photolysis_rates(:)
      !> Whether to have explicitly selected weighting.
      logical :: do_select_weighting
      !> Type of particle weighting scheme.
@@ -205,8 +210,13 @@ contains
          "del_t", run_part_opt%del_t)
 
     if (run_part_opt%do_mosaic) then
-       call mosaic_init(env_state, aero_data, run_part_opt%del_t, &
-            run_part_opt%do_optical)
+       if (run_part_opt%do_fixed_photolysis) then
+          call mosaic_init(env_state, aero_data, run_part_opt%del_t, &
+               run_part_opt%do_optical, run_part_opt%photolysis_rates)
+       else
+          call mosaic_init(env_state, aero_data, run_part_opt%del_t, &
+               run_part_opt%do_optical)
+       end if
        if (run_part_opt%do_optical) then
           call mosaic_aero_optical_init(env_state, aero_data, &
             aero_state, gas_data, gas_state)
@@ -344,6 +354,8 @@ contains
          + pmc_mpi_pack_size_logical(val%do_est) &
          + pmc_mpi_pack_size_logical(val%do_mosaic) &
          + pmc_mpi_pack_size_logical(val%do_optical) &
+         + pmc_mpi_pack_size_logical(val%do_fixed_photolysis) &
+         + pmc_mpi_pack_size_real_array(val%photolysis_rates) &
          + pmc_mpi_pack_size_logical(val%do_select_weighting) &
          + pmc_mpi_pack_size_integer(val%weighting_type) &
          + pmc_mpi_pack_size_real(val%weighting_exponent) &
@@ -404,6 +416,8 @@ contains
     call pmc_mpi_pack_logical(buffer, position, val%do_est)
     call pmc_mpi_pack_logical(buffer, position, val%do_mosaic)
     call pmc_mpi_pack_logical(buffer, position, val%do_optical)
+    call pmc_mpi_pack_logical(buffer, position, val%do_fixed_photolysis)
+    call pmc_mpi_pack_real_array(buffer, position, val%photolysis_rates)
     call pmc_mpi_pack_logical(buffer, position, val%do_select_weighting)
     call pmc_mpi_pack_integer(buffer, position, val%weighting_type)
     call pmc_mpi_pack_real(buffer, position, val%weighting_exponent)
@@ -465,6 +479,8 @@ contains
     call pmc_mpi_unpack_logical(buffer, position, val%do_est)
     call pmc_mpi_unpack_logical(buffer, position, val%do_mosaic)
     call pmc_mpi_unpack_logical(buffer, position, val%do_optical)
+    call pmc_mpi_unpack_logical(buffer, position, val%do_fixed_photolysis)
+    call pmc_mpi_unpack_real_array(buffer, position, val%photolysis_rates)
     call pmc_mpi_unpack_logical(buffer, position, val%do_select_weighting)
     call pmc_mpi_unpack_integer(buffer, position, val%weighting_type)
     call pmc_mpi_unpack_real(buffer, position, val%weighting_exponent)
@@ -701,8 +717,18 @@ contains
     if (run_part_opt%do_mosaic) then
        call spec_file_read_logical(file, 'do_optical', &
             run_part_opt%do_optical)
+       call spec_file_read_logical(file, 'do_fixed_photolysis', &
+            run_part_opt%do_fixed_photolysis)
+       if (run_part_opt%do_fixed_photolysis) then
+          call spec_file_read_string(file, 'photolysis_rates', sub_filename)
+          call spec_file_open(sub_filename, sub_file)
+          call spec_file_read_mosaic_photolysis(sub_file, &
+               run_part_opt%photolysis_rates)
+          call spec_file_close(sub_file)
+       end if
     else
        run_part_opt%do_optical = .false.
+       run_part_opt%do_fixed_photolysis = .false.
     end if
 
     call spec_file_read_logical(file, 'do_nucleation', &

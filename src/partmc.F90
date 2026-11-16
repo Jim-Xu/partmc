@@ -419,6 +419,14 @@ contains
     !!   - \b do_optical (logical): whether to compute optical
     !!     properties of the aerosol particles for the output files ---
     !!     see output_format_aero_state
+    !!   - \b do_fixed_photolysis (logical): whether the photolysis
+    !!     rates are fixed, as in a chamber with artificial light,
+    !!     instead of following the solar zenith angle. If \c
+    !!     do_fixed_photolysis is \c yes, then the following
+    !!     parameters must also be provided:
+    !!     - \b photolysis_rates (string): name of file from which to
+    !!       read the photolysis rates --- the file format should be
+    !!       \subpage input_format_mosaic_photolysis
     !! - \b do_nucleation (logical): whether to perform particle
     !!   nucleation. If \c do_nucleation is \c yes, then the following
     !!   parameters must also be provided:
