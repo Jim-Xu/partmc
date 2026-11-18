@@ -100,6 +100,12 @@ module pmc_scenario
      !> Heights at set-points (m).
      real(kind=dp), allocatable :: height(:)
 
+     !> Photolysis factor set-point times (s); not allocated without a
+     !> photolysis factor profile.
+     real(kind=dp), allocatable :: photolysis_factor_time(:)
+     !> Photolysis factors at set-points (1).
+     real(kind=dp), allocatable :: photolysis_factor(:)
+
      !> Gas emission set-point times (s).
      real(kind=dp), allocatable :: gas_emission_time(:)
      !> Gas emisssion rate scales at set-points (1).
@@ -189,6 +195,7 @@ contains
     env_state%pressure = interp_1d(scenario%pressure_time, &
          scenario%pressure, time)
     env_state%height = interp_1d(scenario%height_time, scenario%height, time)
+    env_state%photolysis_factor = scenario_photolysis_factor(scenario, time)
     env_state%elapsed_time = time
     ! FIXME: should compute this at some point
     env_state%solar_zenith_angle = 0d0
@@ -230,9 +237,30 @@ contains
     env_state%rel_humid = pmv_new / env_state_sat_vapor_pressure(env_state)
 
     env_state%height = interp_1d(scenario%height_time, scenario%height, time)
+    env_state%photolysis_factor = scenario_photolysis_factor(scenario, time)
     env_state%elapsed_time = time
 
   end subroutine scenario_update_env_state
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Factor applied to all photolysis rates of MOSAIC at the given time:
+  !> the interpolated photolysis factor profile, or 1 without one.
+  real(kind=dp) function scenario_photolysis_factor(scenario, time)
+
+    !> Scenario data.
+    type(scenario_t), intent(in) :: scenario
+    !> Current time (s).
+    real(kind=dp), intent(in) :: time
+
+    if (allocated(scenario%photolysis_factor_time)) then
+       scenario_photolysis_factor = interp_1d( &
+            scenario%photolysis_factor_time, scenario%photolysis_factor, time)
+    else
+       scenario_photolysis_factor = 1d0
+    end if
+
+  end function scenario_photolysis_factor
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1533,6 +1561,13 @@ contains
     !! <li> \b height_profile (string): the name of the file from which
     !!      to read the mixing layer height profile --- the file format
     !!      should be \subpage input_format_height_profile
+    !! <li> \b photolysis_factor_profile (string, optional, directly
+    !!      after \c height_profile): the name of the file from which to
+    !!      read a factor applied to all photolysis rates of MOSAIC, for
+    !!      example the ratio of the actual to the clear-sky photolysis
+    !!      under clouds or haze --- the file format should be
+    !!      \subpage input_format_photolysis_factor_profile. If this line
+    !!      is omitted the factor is 1.
     !! <li> \b gas_emissions (string): the name of the file from which to
     !!      read the gas emissions profile --- the file format should be
     !!      \subpage input_format_gas_profile
@@ -1599,6 +1634,20 @@ contains
     call spec_file_read_timed_real_array(sub_file, "height", &
          scenario%height_time, scenario%height)
     call spec_file_close(sub_file)
+
+    ! optional photolysis factor profile
+    call spec_file_read_line(file, line, eof)
+    if (.not. eof) call spec_file_unread_line(file)
+    if ((.not. eof) .and. (line%name == 'photolysis_factor_profile')) then
+       call spec_file_read_string(file, 'photolysis_factor_profile', &
+            sub_filename)
+       call spec_file_open(sub_filename, sub_file)
+       call spec_file_read_timed_real_array(sub_file, "photolysis_factor", &
+            scenario%photolysis_factor_time, scenario%photolysis_factor)
+       call spec_file_close(sub_file)
+       call assert_msg(739104276, all(scenario%photolysis_factor >= 0d0), &
+            "negative photolysis factor in " // trim(sub_filename))
+    end if
 
     ! gas emissions profile
     call spec_file_read_string(file, "gas_emissions", sub_filename)
@@ -1789,6 +1838,39 @@ contains
   !!   - \ref input_format_scenario --- the environment data
   !!     containing the mixing layer height profile
 
+  !> \page input_format_photolysis_factor_profile Input File Format: Photolysis Factor Profile
+  !!
+  !! A photolysis factor profile input file must consist of two lines:
+  !! - the first line must begin with \c time and should be followed
+  !!   by \f$N\f$ space-separated real scalars, giving the times (in
+  !!   s after the start of the simulation) of the set points --- the
+  !!   times must be in increasing order
+  !! - the second line must begin with \c photolysis_factor and should
+  !!   be followed by \f$N\f$ space-separated non-negative real
+  !!   scalars, giving the factors (dimensionless) at the
+  !!   corresponding times
+  !!
+  !! The factor multiplies all photolysis rates of MOSAIC: the
+  !! clear-sky rates computed from the solar zenith angle, or the
+  !! fixed rates if \c do_fixed_photolysis is \c yes. It is linearly
+  !! interpolated between the specified times, while before the first
+  !! time it takes the first value and after the last time it takes
+  !! the last value.
+  !!
+  !! Example:
+  !! <pre>
+  !! time               0  21600  43200  # time (in s) after simulation start
+  !! photolysis_factor  1  0.5    1      # factor (1)
+  !! </pre>
+  !! Here the photolysis rates start at the clear-sky values, fall
+  !! linearly to half of them after 6&nbsp;h and are back at the
+  !! clear-sky values after 12&nbsp;h.
+  !!
+  !! See also:
+  !!   - \ref spec_file_format --- the input file text format
+  !!   - \ref input_format_scenario --- the environment data
+  !!     containing the photolysis factor profile
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   !> Read dry deposition parameters from a spec file.
@@ -1936,6 +2018,8 @@ contains
          + pmc_mpi_pack_size_real_array(val%pressure) &
          + pmc_mpi_pack_size_real_array(val%height_time) &
          + pmc_mpi_pack_size_real_array(val%height) &
+         + pmc_mpi_pack_size_real_array(val%photolysis_factor_time) &
+         + pmc_mpi_pack_size_real_array(val%photolysis_factor) &
          + pmc_mpi_pack_size_real_array(val%gas_emission_time) &
          + pmc_mpi_pack_size_real_array(val%gas_emission_rate_scale) &
          + pmc_mpi_pack_size_real_array(val%gas_dilution_time) &
@@ -2007,6 +2091,8 @@ contains
     call pmc_mpi_pack_real_array(buffer, position, val%pressure)
     call pmc_mpi_pack_real_array(buffer, position, val%height_time)
     call pmc_mpi_pack_real_array(buffer, position, val%height)
+    call pmc_mpi_pack_real_array(buffer, position, val%photolysis_factor_time)
+    call pmc_mpi_pack_real_array(buffer, position, val%photolysis_factor)
     call pmc_mpi_pack_real_array(buffer, position, val%gas_emission_time)
     call pmc_mpi_pack_real_array(buffer, position, val%gas_emission_rate_scale)
     call pmc_mpi_pack_real_array(buffer, position, val%gas_dilution_time)
@@ -2077,6 +2163,9 @@ contains
     call pmc_mpi_unpack_real_array(buffer, position, val%pressure)
     call pmc_mpi_unpack_real_array(buffer, position, val%height_time)
     call pmc_mpi_unpack_real_array(buffer, position, val%height)
+    call pmc_mpi_unpack_real_array(buffer, position, &
+         val%photolysis_factor_time)
+    call pmc_mpi_unpack_real_array(buffer, position, val%photolysis_factor)
     call pmc_mpi_unpack_real_array(buffer, position, val%gas_emission_time)
     call pmc_mpi_unpack_real_array(buffer, position, &
          val%gas_emission_rate_scale)

@@ -1,0 +1,22 @@
+# representative midday photolysis rates of MOSAIC (rounded); the test only uses their ratio to rates_half.dat
+# reaction  rate (s^{-1})
+NO2        0.008
+NO3        0.16
+HONO       0.0015
+HNO3       5E-7
+HNO4       0.000004
+N2O5       0.0
+O3_O3P     0.00042
+O3_O1D     0.000024
+H2O2       0.0000068
+HCHO_R     0.000026
+HCHO_M     0.000052
+CH3OOH     0.0000048
+ETHOOH     0.0000048
+ALD2       0.0000037
+AONE       6.2E-7
+MGLY       0.00025
+OPEN       0.00024
+ROOH       0.0000048
+ONIT       8E-7
+ISOPRD     0.0000013

@@ -1,0 +1,22 @@
+# half of the rates in rates.dat (exact decimal halves)
+# reaction  rate (s^{-1})
+NO2        0.004
+NO3        0.08
+HONO       0.00075
+HNO3       2.5E-7
+HNO4       0.000002
+N2O5       0.0
+O3_O3P     0.00021
+O3_O1D     0.000012
+H2O2       0.0000034
+HCHO_R     0.000013
+HCHO_M     0.000026
+CH3OOH     0.0000024
+ETHOOH     0.0000024
+ALD2       0.00000185
+AONE       3.1E-7
+MGLY       0.000125
+OPEN       0.00012
+ROOH       0.0000024
+ONIT       4E-7
+ISOPRD     6.5E-7

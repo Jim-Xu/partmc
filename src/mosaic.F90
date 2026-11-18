@@ -326,6 +326,7 @@ contains
     use module_data_mosaic_main, only: tbeg_sec, tcur_sec, tmid_sec, &
          dt_sec, dt_min, dt_aeroptic_min, RH, te, pr_atm, cnn, cair_mlc, &
          cair_molm3, ppb, avogad, msolar, naerbin
+    use module_data_mosaic_gas, only: photo_factor
 #endif
 
     !> Environment state.
@@ -394,6 +395,7 @@ contains
     cair_mlc = avogad*pr_atm/(82.056d0*te)   ! air conc [molec/cc]
     cair_molm3 = 1d6*pr_atm/(82.056d0*te)    ! air conc [mol/m^3]
     ppb = 1d9
+    photo_factor = env_state%photolysis_factor ! factor on all photolysis rates
 
     ! aerosol data: map PartMC -> MOSAIC
     nbin_a = aero_state_total_particles(aero_state)

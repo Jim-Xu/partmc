@@ -71,6 +71,8 @@ module pmc_env_state
      real(kind=dp) :: elapsed_time
      !> Solar zenith angle (radians from zenith).
      real(kind=dp) :: solar_zenith_angle
+     !> Factor applied to all photolysis rates of MOSAIC (1).
+     real(kind=dp) :: photolysis_factor = 1d0
      !> Box height (m).
      real(kind=dp) :: height
      !> Scaling coefficient for additive coagulation kernel.
@@ -101,6 +103,8 @@ contains
          + env_state_delta%elapsed_time
     env_state%solar_zenith_angle = env_state%solar_zenith_angle &
          + env_state_delta%solar_zenith_angle
+    env_state%photolysis_factor = env_state%photolysis_factor &
+         + env_state_delta%photolysis_factor
     env_state%height = env_state%height + env_state_delta%height
 
   end subroutine env_state_add
@@ -125,6 +129,7 @@ contains
     env_state%start_day = nint(real(env_state%start_day, kind=dp) * alpha)
     env_state%elapsed_time = env_state%elapsed_time * alpha
     env_state%solar_zenith_angle = env_state%solar_zenith_angle * alpha
+    env_state%photolysis_factor = env_state%photolysis_factor * alpha
     env_state%height = env_state%height * alpha
 
   end subroutine env_state_scale
@@ -409,6 +414,7 @@ contains
          + pmc_mpi_pack_size_integer(val%start_day) &
          + pmc_mpi_pack_size_real(val%elapsed_time) &
          + pmc_mpi_pack_size_real(val%solar_zenith_angle) &
+         + pmc_mpi_pack_size_real(val%photolysis_factor) &
          + pmc_mpi_pack_size_real(val%height) &
          + pmc_mpi_pack_size_real(val%additive_kernel_coefficient)
 
@@ -453,6 +459,7 @@ contains
     call pmc_mpi_pack_integer(buffer, position, val%start_day)
     call pmc_mpi_pack_real(buffer, position, val%elapsed_time)
     call pmc_mpi_pack_real(buffer, position, val%solar_zenith_angle)
+    call pmc_mpi_pack_real(buffer, position, val%photolysis_factor)
     call pmc_mpi_pack_real(buffer, position, val%height)
     call pmc_mpi_pack_real(buffer, position, val%additive_kernel_coefficient)
     call assert(464101191, &
@@ -501,6 +508,7 @@ contains
     call pmc_mpi_unpack_integer(buffer, position, val%start_day)
     call pmc_mpi_unpack_real(buffer, position, val%elapsed_time)
     call pmc_mpi_unpack_real(buffer, position, val%solar_zenith_angle)
+    call pmc_mpi_unpack_real(buffer, position, val%photolysis_factor)
     call pmc_mpi_unpack_real(buffer, position, val%height)
     call pmc_mpi_unpack_real(buffer, position, val%additive_kernel_coefficient)
     call assert(205696745, &
@@ -554,6 +562,9 @@ contains
     !!   - \b elapsed_time (unit s): elapsed time since the simulation start
     !!   - \b solar_zenith_angle (unit radians): current angle from
     !!     the zenith to the sun
+    !!   - \b photolysis_factor (dimensionless): current factor applied
+    !!     to all photolysis rates of MOSAIC (see
+    !!     \ref input_format_photolysis_factor_profile)
     !!   - \b height (unit m): current boundary layer mixing height
     !!
     !! See also:
@@ -601,6 +612,9 @@ contains
     call pmc_nc_write_real(ncid, env_state%solar_zenith_angle, &
          "solar_zenith_angle", unit="radian", &
          description="current angle from the zenith to the sun")
+    call pmc_nc_write_real(ncid, env_state%photolysis_factor, &
+         "photolysis_factor", unit="1", &
+         description="factor applied to all photolysis rates of MOSAIC")
     call pmc_nc_write_real(ncid, env_state%height, "height", unit="m", &
          long_name="boundary layer mixing height")
 
@@ -615,6 +629,8 @@ contains
     type(env_state_t), intent(inout) :: env_state
     !> NetCDF file ID, in data mode.
     integer, intent(in) :: ncid
+
+    integer :: varid
 
     call pmc_nc_read_real(ncid, env_state%temp, "temperature")
     call pmc_nc_read_real(ncid, env_state%rel_humid, "relative_humidity")
@@ -639,6 +655,14 @@ contains
     call pmc_nc_read_real(ncid, env_state%elapsed_time, "elapsed_time")
     call pmc_nc_read_real(ncid, env_state%solar_zenith_angle, &
          "solar_zenith_angle")
+    ! files written before the photolysis factor was added do not have it
+    if (nf90_inq_varid(ncid, "photolysis_factor", varid) &
+         == NF90_NOERR) then
+       call pmc_nc_read_real(ncid, env_state%photolysis_factor, &
+            "photolysis_factor")
+    else
+       env_state%photolysis_factor = 1d0
+    end if
     call pmc_nc_read_real(ncid, env_state%height, "height")
 
   end subroutine env_state_input_netcdf
