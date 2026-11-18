@@ -163,7 +163,9 @@ module pmc_scenario
   !! entrains residual-layer air up to \c top and background air above
   !! it. With MOSAIC the residual layer has the same chemistry as the
   !! mixed layer, at the temperature, pressure and humidity of the mixed
-  !! layer; it has no emissions, coagulation, dilution or deposition (see
+  !! layer. It exchanges with the background air at the dilution rates of
+  !! the mixed layer, as part of the same air mass, but it has no
+  !! emissions, coagulation or deposition (see
   !! scenario_update_residual_layer()).
   type residual_layer_t
      !> Height of the top of the residual layer (m). The residual layer is
@@ -483,6 +485,11 @@ contains
     residual_layer%gas_state%mix_rat = 0d0
     call aero_state_zero(residual_layer%aero_state)
     call aero_state_copy_weight(aero_state, residual_layer%aero_state)
+    ! the residual layer aims at the number of computational particles of
+    ! the mixed layer when background particles are added to it
+    if (allocated(aero_state%n_part_ideal)) then
+       residual_layer%aero_state%n_part_ideal = aero_state%n_part_ideal
+    end if
 
   end subroutine residual_layer_init
 
@@ -574,15 +581,24 @@ contains
   !! by random removal and enter the other layer as copies with the
   !! expected concentration for any particle weighting (see
   !! scenario_add_sample_copies()), so the particles of the residual
-  !! layer return with their composition and mixing state. The residual
-  !! layer has no emissions, coagulation, dilution or deposition; with
-  !! MOSAIC its chemistry is computed in run_part_timestep() at the
-  !! temperature, pressure and humidity of the mixed layer. Its
-  !! concentrations follow the temperature and pressure of the mixed
-  !! layer, so that its mixing ratios are conserved. Exchange with the
-  !! background at the dilution rate of the background profiles applies
-  !! to the mixed layer only (scenario_update_gas_state() and
-  !! scenario_update_aero_state()).
+  !! layer return with their composition and mixing state.
+  !!
+  !! Before this exchange, a non-empty residual layer mixes with the
+  !! background air at the dilution rate \f$\lambda\f$ of the background
+  !! profiles, as the mixed layer does in scenario_update_gas_state() and
+  !! scenario_update_aero_state():
+  !! \f[
+  !!     c_{\rm rl} \leftarrow p\, c_{\rm rl} + (1 - p)\, b,
+  !!     \qquad p = \exp(-\lambda \Delta t),
+  !! \f]
+  !! for the gases and, by random removal and addition of background
+  !! particles, for the aerosol; both layers are part of the same air
+  !! mass, which mixes with the background air as a whole. The residual
+  !! layer has no emissions, coagulation or deposition; with MOSAIC its
+  !! chemistry is computed in run_part_timestep() at the temperature,
+  !! pressure and humidity of the mixed layer. Its concentrations follow
+  !! the temperature and pressure of the mixed layer, so that its mixing
+  !! ratios are conserved.
   subroutine scenario_update_residual_layer(scenario, delta_t, env_state, &
        old_env_state, gas_state, aero_data, aero_state, residual_layer, &
        allow_doubling, allow_halving, n_dil_in, n_dil_out)
@@ -614,7 +630,7 @@ contains
 
     real(kind=dp), parameter :: sample_timescale = 3600.0d0
     real(kind=dp) :: h_old, h_new, d_rl, f, d_from_rl, d_from_bg
-    real(kind=dp) :: dilution_rate, characteristic_factor
+    real(kind=dp) :: dilution_rate, characteristic_factor, p_dil
     type(gas_state_t) :: gas_background
     type(aero_dist_t) :: aero_background
     type(aero_state_t) :: aero_state_delta
@@ -630,6 +646,45 @@ contains
     call aero_weight_array_scale(residual_layer%aero_state%awa, &
          old_env_state%temp * env_state%pressure &
          / (env_state%temp * old_env_state%pressure))
+
+    ! exchange with the background air at the dilution rates of the mixed
+    ! layer, as in scenario_update_gas_state() and
+    ! scenario_update_aero_state()
+    if (residual_layer%top > h_old) then
+       call gas_state_interp_1d(scenario%gas_background, &
+            scenario%gas_dilution_time, scenario%gas_dilution_rate, &
+            env_state%elapsed_time, gas_background, dilution_rate)
+       if (dilution_rate > 0d0) then
+          p_dil = exp(- dilution_rate * delta_t)
+          residual_layer%gas_state%mix_rat = p_dil &
+               * residual_layer%gas_state%mix_rat &
+               + (1d0 - p_dil) * gas_background%mix_rat
+       end if
+       call aero_dist_interp_1d(scenario%aero_background, &
+            scenario%aero_dilution_time, scenario%aero_dilution_rate, &
+            env_state%elapsed_time, aero_background, dilution_rate)
+       if (dilution_rate > 0d0) then
+          p_dil = exp(- dilution_rate * delta_t)
+          ! loss to the background ...
+          call aero_state_zero(aero_state_delta)
+          call aero_state_copy_weight(residual_layer%aero_state, &
+               aero_state_delta)
+          call aero_state_sample_particles(residual_layer%aero_state, &
+               aero_state_delta, aero_data, 1d0 - p_dil, AERO_INFO_NONE)
+          ! ... and addition from the background
+          if ((.not. allocated(residual_layer%aero_state%n_part_ideal)) &
+               .and. allocated(aero_state%n_part_ideal)) then
+             residual_layer%aero_state%n_part_ideal &
+                  = aero_state%n_part_ideal
+          end if
+          characteristic_factor = max(1d0, min(sample_timescale, &
+               env_state%elapsed_time)) / delta_t
+          call aero_state_add_aero_dist_sample(residual_layer%aero_state, &
+               aero_data, aero_background, 1d0 - p_dil, &
+               characteristic_factor, env_state%elapsed_time, &
+               allow_doubling, allow_halving, n_bg)
+       end if
+    end if
 
     if (h_new < h_old) then
        d_rl = max(residual_layer%top - h_old, 0d0)
@@ -1607,8 +1662,11 @@ contains
     !!      a residual layer above it and entrained again, with its
     !!      particles, when the mixing height rises; above the top of the
     !!      residual layer the mixed layer entrains background air
-    !!      (particle-resolved runs only). If this line is omitted or \c
-    !!      no, the mixed layer always entrains background air.
+    !!      (particle-resolved runs only). The residual layer exchanges
+    !!      with the background air at the dilution rates of the gas and
+    !!      aerosol background profiles, as the mixed layer does. If this
+    !!      line is omitted or \c no, the mixed layer always entrains
+    !!      background air.
     !! </ul>
     !!
     !! See also:

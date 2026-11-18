@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Reference solutions for the residual layer and gas dry deposition test case.
 
-Writes ref_rl_gas.txt, ref_rl_aero.txt (with the residual layer) and
-ref_norl_gas.txt, ref_norl_aero.txt (without it), in the column layout of
-extract_gas and extract_aero_time. The gases are passive (no chemistry) and the
+Writes ref_rl_gas.txt, ref_rl_aero.txt (with the residual layer),
+ref_norl_gas.txt, ref_norl_aero.txt (without it) and ref_rldil_gas.txt,
+ref_rldil_aero.txt (with the residual layer and exchange with the background
+air at 1/(4 h)), in the column layout of extract_gas and extract_aero_time. The gases are passive (no chemistry) and the
 aerosol has no coagulation, so every quantity follows from the input files by
 mixing, emission and first-order deposition alone. The time stepping is the
 operator splitting of PartMC: in each step of 60 s ending at time t, emissions
@@ -12,7 +13,10 @@ the mixed layer exchanges air with the layers above when h changes from
 h(t - 60 s) to h(t). Without a residual layer, a growing mixed layer entrains
 background air; with it, the air between the old and new mixing height goes
 to the residual layer when the mixed layer becomes shallower and comes back
-before any background air when it grows again.
+before any background air when it grows again. With a dilution rate k (gas_back_dil.dat,
+aero_back_dil.dat) the mixed layer mixes with the background air at the factor
+p = exp(-k dt) after the emissions and before the deposition, and a non-empty
+residual layer does the same before the exchange of the step.
 """
 import math
 
@@ -32,6 +36,7 @@ AERO = ['SI', 'SB', 'SE']
 NUM_INIT = dict(SI=1e9)                              # m-3
 NUM_BACK = dict(SB=2e9)                              # m-3
 NUM_EMIT = dict(SE=1e8)                              # m-2 s-1 at rate 1
+K_DIL = 6.944444444444444e-05                        # s-1, rate in gas_back_dil.dat, aero_back_dil.dat
 
 def height(t):
     for (t0, h0), (t1, h1) in zip(HEIGHT[:-1], HEIGHT[1:]):
@@ -51,7 +56,7 @@ def particle_mass(sp):
     d, rho = MODES[sp]
     return math.pi / 6 * d ** 3 * rho
 
-def run(residual_layer):
+def run(residual_layer, k=0.0):
     c = {g: GAS_INIT.get(g, 0.0) for g in GAS}                         # ppb
     n = {a: NUM_INIT.get(a, 0.0) for a in AERO}                        # m-3
     bg_c = {g: GAS_BACK.get(g, 0.0) for g in GAS}
@@ -66,13 +71,19 @@ def run(residual_layer):
             c[g] += rate * e * DT / h1 * 1e9 / NAIR
         for a, e in NUM_EMIT.items():
             n[a] += rate * e * DT / h1
+        p = math.exp(-k * DT)
         if not residual_layer and h1 > h0:
-            f = h0 / h1
-            c = {g: f * c[g] + (1 - f) * bg_c[g] for g in GAS}
-            n = {a: f * n[a] + (1 - f) * bg_n[a] for a in AERO}
+            p *= h0 / h1
+        if p < 1.0:
+            c = {g: p * c[g] + (1 - p) * bg_c[g] for g in GAS}
+            n = {a: p * n[a] + (1 - p) * bg_n[a] for a in AERO}
         r, v = step_value(DEPO, t)
         c['HNO3'] *= math.exp(-r * v * DT / h1)
         if residual_layer:
+            if top > h0 and k > 0.0:
+                p = math.exp(-k * DT)
+                rl_c = {g: p * rl_c[g] + (1 - p) * bg_c[g] for g in GAS}
+                rl_n = {a: p * rl_n[a] + (1 - p) * bg_n[a] for a in AERO}
             if h1 < h0:
                 d = max(top - h0, 0.0); f = (h0 - h1) / (d + h0 - h1)
                 rl_c = {g: (1 - f) * rl_c[g] + f * c[g] for g in GAS}
@@ -100,3 +111,4 @@ def write(rows, prefix):
 if __name__ == '__main__':
     write(run(True), 'ref_rl')
     write(run(False), 'ref_norl')
+    write(run(True, K_DIL), 'ref_rldil')

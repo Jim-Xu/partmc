@@ -1,0 +1,7 @@
+# time (s)
+# rate (s^{-1}): exchange with the background air at 1/(4 h), in the mixed
+# layer and in the residual layer
+# aerosol distribution filename
+time 0
+rate 6.944444444444444e-05
+dist aero_back_dist.dat
