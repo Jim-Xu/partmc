@@ -101,6 +101,9 @@ module pmc_run_part
      !> Fixed photolysis rates of MOSAIC (s^{-1}), see
      !> MOSAIC_PHOTOLYSIS_NAME.
      real(kind=dp), allocatable :: photolysis_rates(:)
+     !> Acidity of the acid-catalyzed IEPOX uptake in MOSAIC
+     !> (MOSAIC_IEPOX_ACIDITY_ISORROPIA or MOSAIC_IEPOX_ACIDITY_MOSAIC).
+     integer :: iepox_acidity = MOSAIC_IEPOX_ACIDITY_ISORROPIA
      !> Whether to have explicitly selected weighting.
      logical :: do_select_weighting
      !> Type of particle weighting scheme.
@@ -213,10 +216,12 @@ contains
     if (run_part_opt%do_mosaic) then
        if (run_part_opt%do_fixed_photolysis) then
           call mosaic_init(env_state, aero_data, run_part_opt%del_t, &
-               run_part_opt%do_optical, run_part_opt%photolysis_rates)
+               run_part_opt%do_optical, run_part_opt%photolysis_rates, &
+               iepox_acidity=run_part_opt%iepox_acidity)
        else
           call mosaic_init(env_state, aero_data, run_part_opt%del_t, &
-               run_part_opt%do_optical)
+               run_part_opt%do_optical, &
+               iepox_acidity=run_part_opt%iepox_acidity)
        end if
        if (run_part_opt%do_optical) then
           call mosaic_aero_optical_init(env_state, aero_data, &
@@ -365,6 +370,7 @@ contains
          + pmc_mpi_pack_size_logical(val%do_optical) &
          + pmc_mpi_pack_size_logical(val%do_fixed_photolysis) &
          + pmc_mpi_pack_size_real_array(val%photolysis_rates) &
+         + pmc_mpi_pack_size_integer(val%iepox_acidity) &
          + pmc_mpi_pack_size_logical(val%do_select_weighting) &
          + pmc_mpi_pack_size_integer(val%weighting_type) &
          + pmc_mpi_pack_size_real(val%weighting_exponent) &
@@ -427,6 +433,7 @@ contains
     call pmc_mpi_pack_logical(buffer, position, val%do_optical)
     call pmc_mpi_pack_logical(buffer, position, val%do_fixed_photolysis)
     call pmc_mpi_pack_real_array(buffer, position, val%photolysis_rates)
+    call pmc_mpi_pack_integer(buffer, position, val%iepox_acidity)
     call pmc_mpi_pack_logical(buffer, position, val%do_select_weighting)
     call pmc_mpi_pack_integer(buffer, position, val%weighting_type)
     call pmc_mpi_pack_real(buffer, position, val%weighting_exponent)
@@ -490,6 +497,7 @@ contains
     call pmc_mpi_unpack_logical(buffer, position, val%do_optical)
     call pmc_mpi_unpack_logical(buffer, position, val%do_fixed_photolysis)
     call pmc_mpi_unpack_real_array(buffer, position, val%photolysis_rates)
+    call pmc_mpi_unpack_integer(buffer, position, val%iepox_acidity)
     call pmc_mpi_unpack_logical(buffer, position, val%do_select_weighting)
     call pmc_mpi_unpack_integer(buffer, position, val%weighting_type)
     call pmc_mpi_unpack_real(buffer, position, val%weighting_exponent)
@@ -568,6 +576,9 @@ contains
     character(len=PMC_MAX_FILENAME_LEN) :: camp_config_filename, &
          tchem_gas_filename, tchem_aero_filename, tchem_numerics_filename
     integer :: n_grid_cells
+    type(spec_line_t) :: line
+    logical :: eof
+    character(len=SPEC_LINE_MAX_VAR_LEN) :: iepox_acidity_name
 
     call spec_file_read_string(file, 'output_prefix', &
          run_part_opt%output_prefix)
@@ -734,6 +745,23 @@ contains
           call spec_file_read_mosaic_photolysis(sub_file, &
                run_part_opt%photolysis_rates)
           call spec_file_close(sub_file)
+       end if
+       ! optional acidity of the acid-catalyzed IEPOX uptake
+       run_part_opt%iepox_acidity = MOSAIC_IEPOX_ACIDITY_ISORROPIA
+       call spec_file_read_line(file, line, eof)
+       if (.not. eof) call spec_file_unread_line(file)
+       if ((.not. eof) .and. (line%name == 'iepox_acidity')) then
+          call spec_file_read_string(file, 'iepox_acidity', &
+               iepox_acidity_name)
+          if (trim(iepox_acidity_name) == 'isorropia') then
+             run_part_opt%iepox_acidity = MOSAIC_IEPOX_ACIDITY_ISORROPIA
+          else if (trim(iepox_acidity_name) == 'mosaic') then
+             run_part_opt%iepox_acidity = MOSAIC_IEPOX_ACIDITY_MOSAIC
+          else
+             call spec_file_die_msg(637481920, file, &
+                  "unknown iepox_acidity: " // trim(iepox_acidity_name) &
+                  // " (must be isorropia or mosaic)")
+          end if
        end if
     else
        run_part_opt%do_optical = .false.

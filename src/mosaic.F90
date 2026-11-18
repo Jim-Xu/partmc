@@ -36,6 +36,13 @@ module pmc_mosaic
        "HCHO_M", "CH3OOH", "ETHOOH", "ALD2",   "AONE", &
        "MGLY",   "OPEN",   "ROOH",   "ONIT",   "ISOPRD"]
 
+  !> Acidity of the acid-catalyzed IEPOX uptake: MOSAIC's own acidity of
+  !> each particle.
+  integer, parameter :: MOSAIC_IEPOX_ACIDITY_MOSAIC = 0
+  !> Acidity of the acid-catalyzed IEPOX uptake: one ISORROPIA II
+  !> calculation on the totals of gases and particles, as in CMAQ.
+  integer, parameter :: MOSAIC_IEPOX_ACIDITY_ISORROPIA = 1
+
 contains
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -55,7 +62,7 @@ contains
 
   !> Initialize all MOSAIC data-structures.
   subroutine mosaic_init(env_state, aero_data, del_t, do_optical, &
-       photolysis_rates)
+       photolysis_rates, iepox_acidity)
 
 #ifdef PMC_USE_MOSAIC
     use module_data_mosaic_aero, only: alpha_ASTEM, rtol_eqb_ASTEM, &
@@ -74,7 +81,8 @@ contains
          jphoto_isoprd
 
     use module_data_mosaic_soa, only: nsoa, nsoa_sv, soa_name_a, soa_mw, &
-         nsoa_prxn, soa_prxn_from, soa_prxn_to, lsv_pcso, lnv_pcso2
+         nsoa_prxn, soa_prxn_from, soa_prxn_to, lsv_pcso, lnv_pcso2, &
+         soa_iepox_acidity
 #endif
 
     !> Environment state.
@@ -90,6 +98,10 @@ contains
     !> light. If not present, the rates follow the solar zenith angle.
     real(kind=dp), intent(in), optional :: &
          photolysis_rates(MOSAIC_N_PHOTOLYSIS)
+    !> Acidity of the acid-catalyzed IEPOX uptake
+    !> (MOSAIC_IEPOX_ACIDITY_ISORROPIA or MOSAIC_IEPOX_ACIDITY_MOSAIC);
+    !> MOSAIC's default (ISORROPIA) if not present.
+    integer, intent(in), optional :: iepox_acidity
 
 #ifdef PMC_USE_MOSAIC
     integer :: i_soa, i_spec, i_rxn
@@ -106,6 +118,14 @@ contains
     end interface
 
     call init_data_modules  ! initialize indices and vars
+
+    if (present(iepox_acidity)) then
+       call assert_msg(218446017, &
+            (iepox_acidity == MOSAIC_IEPOX_ACIDITY_MOSAIC) &
+            .or. (iepox_acidity == MOSAIC_IEPOX_ACIDITY_ISORROPIA), &
+            "unknown acidity of the IEPOX uptake")
+       soa_iepox_acidity = iepox_acidity
+    end if
 
     ! allocate one aerosol bin
     naerbin = 1

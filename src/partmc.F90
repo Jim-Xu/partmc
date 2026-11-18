@@ -427,6 +427,13 @@ contains
     !!     - \b photolysis_rates (string): name of file from which to
     !!       read the photolysis rates --- the file format should be
     !!       \subpage input_format_mosaic_photolysis
+    !!   - \b iepox_acidity (string, optional): the acidity used for the
+    !!     acid-catalyzed uptake of isoprene epoxydiols (IEPOX), either
+    !!     \c isorropia (the default if this line is omitted) for one
+    !!     ISORROPIA II calculation on the totals of the gases and all
+    !!     particles, applied to every particle with an aqueous phase,
+    !!     as CMAQ does for each of its modes, or \c mosaic for MOSAIC's
+    !!     own acidity of each particle
     !! - \b do_nucleation (logical): whether to perform particle
     !!   nucleation. If \c do_nucleation is \c yes, then the following
     !!   parameters must also be provided:

@@ -224,6 +224,7 @@ add_test(test_mixing_state ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh mi
 if(ENABLE_MOSAIC)
   add_test(test_mosaic ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh mosaic)
   add_test(test_photolysis_factor ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh photolysis_factor)
+  add_test(test_iepox_acidity ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh iepox_acidity)
 endif()
 add_test(test_nucleate ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh nucleate)
 add_test(test_organics ${CMAKE_BINARY_DIR}/test_run/run_test_directory.sh organics)
