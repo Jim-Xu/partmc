@@ -81,6 +81,8 @@ contains
     integer i_time, n_time, i_summary
     logical do_output, do_progress
 
+    call assert_msg(581720348, .not. scenario%do_residual_layer, &
+         "residual_layer is only supported for run_type particle")
     call check_time_multiple("t_max", run_modal_opt%t_max, &
          "del_t", run_modal_opt%del_t)
     call check_time_multiple("t_output", run_modal_opt%t_output, &

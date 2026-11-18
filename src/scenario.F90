@@ -134,7 +134,41 @@ module pmc_scenario
      type(drydep_params_t) :: drydep
      !> Chamber parameters for wall loss and sedimentation.
      type(chamber_t) :: chamber
+
+     !> Gas dry deposition set-point times (s); not allocated without gas
+     !> dry deposition.
+     real(kind=dp), allocatable :: gas_deposition_time(:)
+     !> Gas dry deposition velocity scales at set-points (1).
+     real(kind=dp), allocatable :: gas_deposition_rate_scale(:)
+     !> Gas dry deposition velocities at set-points (m s^{-1}), stored in
+     !> the mixing ratio array of a gas state.
+     type(gas_state_t), allocatable :: gas_deposition(:)
+
+     !> Whether air leaving the mixed layer is kept in a residual layer
+     !> above it and entrained again when the mixed layer grows.
+     logical :: do_residual_layer = .false.
   end type scenario_t
+
+  !> Residual layer above the mixed layer.
+  !!
+  !! When the mixed layer becomes shallower, the air between the new and
+  !! the old mixing height is added to the residual layer, which spans
+  !! from the mixing height to \c top. When the mixed layer grows, it
+  !! entrains residual-layer air up to \c top and background air above
+  !! it. With MOSAIC the residual layer has the same chemistry as the
+  !! mixed layer, at the temperature, pressure and humidity of the mixed
+  !! layer; it has no emissions, coagulation, dilution or deposition (see
+  !! scenario_update_residual_layer()).
+  type residual_layer_t
+     !> Height of the top of the residual layer (m). The residual layer is
+     !> empty when \c top is not above the mixing height.
+     real(kind=dp) :: top = 0d0
+     !> Gas mixing ratios in the residual layer (ppb).
+     type(gas_state_t) :: gas_state
+     !> Particles of the residual layer (concentrations at the temperature
+     !> and pressure of the mixed layer).
+     type(aero_state_t) :: aero_state
+  end type residual_layer_t
 
 contains
 
@@ -239,6 +273,17 @@ contains
   !! \f[
   !!     p(t) = \min\left(1, \frac{h(0)}{h(t)}\right) \exp(-\lambda t).
   !! \f]
+  !! With a residual layer (\c residual_layer in the spec file) the
+  !! factor \f$h(0)/h(t)\f$ is left out here, and the entrainment is done
+  !! by scenario_update_residual_layer() instead.
+  !!
+  !! With gas dry deposition (\c gas_deposition in the spec file), each
+  !! gas species \f$i\f$ is then lost at the first-order rate
+  !! \f$r(t) v_i(t) / h(t)\f$, with \f$v_i\f$ the dry deposition
+  !! velocity and \f$r\f$ the scaling of the deposition profile:
+  !! \f[
+  !!     c_i(t) = c_i(0) \exp(- r v_i t / h).
+  !! \f]
   subroutine scenario_update_gas_state(scenario, delta_t, env_state, &
        old_env_state, gas_data, gas_state)
 
@@ -256,7 +301,8 @@ contains
     type(gas_state_t), intent(inout) :: gas_state
 
     real(kind=dp) :: emission_rate_scale, dilution_rate, p
-    type(gas_state_t) :: emissions, background
+    real(kind=dp) :: deposition_rate_scale
+    type(gas_state_t) :: emissions, background, deposition
 
     ! emissions
     if (size(scenario%gas_emission) > 0) then
@@ -268,16 +314,28 @@ contains
        call gas_state_add_scaled(gas_state, emissions, p)
     end if
 #ifndef PMC_USE_WRF
-    ! dilution
+    ! dilution; with a residual layer, the entrainment when the mixed
+    ! layer grows is done by scenario_update_residual_layer()
     call gas_state_interp_1d(scenario%gas_background, &
          scenario%gas_dilution_time, scenario%gas_dilution_rate, &
          env_state%elapsed_time, background, dilution_rate)
     p = exp(- dilution_rate * delta_t)
-    if (env_state%height > old_env_state%height) then
+    if ((env_state%height > old_env_state%height) &
+         .and. (.not. scenario%do_residual_layer)) then
        p = p * old_env_state%height / env_state%height
     end if
     call gas_state_scale(gas_state, p)
     call gas_state_add_scaled(gas_state, background, 1d0 - p)
+    ! dry deposition: first-order loss at the rate v_d / h
+    if (allocated(scenario%gas_deposition_time)) then
+       call gas_state_interp_1d(scenario%gas_deposition, &
+            scenario%gas_deposition_time, &
+            scenario%gas_deposition_rate_scale, env_state%elapsed_time, &
+            deposition, deposition_rate_scale)
+       gas_state%mix_rat = gas_state%mix_rat &
+            * exp(- deposition_rate_scale * deposition%mix_rat * delta_t &
+            / env_state%height)
+    end if
 #endif
     call gas_state_ensure_nonnegative(gas_state)
 
@@ -344,7 +402,8 @@ contains
          scenario%aero_dilution_time, scenario%aero_dilution_rate, &
          env_state%elapsed_time, background, dilution_rate)
     p = exp(- dilution_rate * delta_t)
-    if (env_state%height > old_env_state%height) then
+    if ((env_state%height > old_env_state%height) &
+         .and. (.not. scenario%do_residual_layer)) then
        p = p * old_env_state%height / env_state%height
     end if
     ! loss to background
@@ -374,6 +433,238 @@ contains
 #endif
 
   end subroutine scenario_update_aero_state
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Initialize an empty residual layer above the mixed layer.
+  subroutine residual_layer_init(residual_layer, env_state, gas_data, &
+       aero_state)
+
+    !> Residual layer.
+    type(residual_layer_t), intent(inout) :: residual_layer
+    !> Environment state (gives the initial mixing height).
+    type(env_state_t), intent(in) :: env_state
+    !> Gas data.
+    type(gas_data_t), intent(in) :: gas_data
+    !> Aerosol state of the mixed layer (gives the particle weighting).
+    type(aero_state_t), intent(in) :: aero_state
+
+    residual_layer%top = env_state%height
+    call gas_state_set_size(residual_layer%gas_state, &
+         gas_data_n_spec(gas_data))
+    residual_layer%gas_state%mix_rat = 0d0
+    call aero_state_zero(residual_layer%aero_state)
+    call aero_state_copy_weight(aero_state, residual_layer%aero_state)
+
+  end subroutine residual_layer_init
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Add to \c aero_state_to copies of the particles of \c
+  !> aero_state_from so that the expected added concentration is \c
+  !> sample_prob times the concentration of \c aero_state_from, for any
+  !> weighting of the two states.
+  !!
+  !! Each particle of \c aero_state_from is copied
+  !! <tt>prob_round(sample_prob * c_from / c_to)</tt> times, where \c
+  !! c_from and \c c_to are the number concentrations it represents with
+  !! the weighting of \c aero_state_from and of \c aero_state_to, so the
+  !! result is unbiased particle by particle. (aero_state_sample_particles()
+  !! counts removals and is unbiased only when this ratio is the same for
+  !! all particles.) Weight classes without particles in \c aero_state_to
+  !! first take the weights of \c aero_state_from, so that the ratio is
+  !! never formed with the unset weights of an unused class. The copies get
+  !! new IDs.
+  subroutine scenario_add_sample_copies(aero_state_from, aero_state_to, &
+       aero_data, sample_prob)
+
+    !> State to copy from.
+    type(aero_state_t), intent(in) :: aero_state_from
+    !> State to add to.
+    type(aero_state_t), intent(inout) :: aero_state_to
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+    !> Fraction of the concentration of \c aero_state_from to add.
+    real(kind=dp), intent(in) :: sample_prob
+
+    integer :: i_part, i_copy, n_copies, i_group, i_class, n_in_class
+    real(kind=dp) :: num_conc_from, num_conc_to
+    type(aero_particle_t) :: new_aero_particle
+
+    do i_class = 1,aero_weight_array_n_class(aero_state_to%awa)
+       n_in_class = 0
+       do i_group = 1,aero_weight_array_n_group(aero_state_to%awa)
+          n_in_class = n_in_class &
+               + aero_state_total_particles(aero_state_to, i_group, i_class)
+       end do
+       if (n_in_class == 0) then
+          aero_state_to%awa%weight(:, i_class) &
+               = aero_state_from%awa%weight(:, i_class)
+       end if
+    end do
+
+    do i_part = 1,aero_state_n_part(aero_state_from)
+       num_conc_from = aero_weight_array_num_conc(aero_state_from%awa, &
+            aero_state_from%apa%particle(i_part), aero_data)
+       num_conc_to = aero_weight_array_num_conc(aero_state_to%awa, &
+            aero_state_from%apa%particle(i_part), aero_data)
+       n_copies = prob_round(sample_prob * num_conc_from / num_conc_to)
+       do i_copy = 1,n_copies
+          new_aero_particle = aero_state_from%apa%particle(i_part)
+          call aero_particle_new_id(new_aero_particle)
+          call aero_state_add_particle(aero_state_to, new_aero_particle, &
+               aero_data)
+       end do
+    end do
+
+  end subroutine scenario_add_sample_copies
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Exchange of the mixed layer with the residual layer above it when
+  !> the mixing height changes from \f$h_0\f$ to \f$h_1\f$.
+  !!
+  !! The residual layer spans from the mixing height to its top
+  !! \f$z\f$, so its depth before the step is \f$d = \max(z - h_0,
+  !! 0)\f$. When the mixing height falls, the layer between \f$h_1\f$
+  !! and \f$h_0\f$ leaves the mixed layer, whose concentrations do not
+  !! change, and joins the residual layer:
+  !! \f[
+  !!     c_{\rm rl} \leftarrow (1 - f) c_{\rm rl} + f c, \quad
+  !!     f = \frac{h_0 - h_1}{d + h_0 - h_1}, \quad
+  !!     z \leftarrow \max(z, h_0).
+  !! \f]
+  !! When the mixing height rises, the mixed layer entrains \f$d_{\rm
+  !! rl} = \max(\min(h_1, z) - h_0, 0)\f$ of residual-layer air and
+  !! \f$d_{\rm bg} = h_1 - h_0 - d_{\rm rl}\f$ of background air:
+  !! \f[
+  !!     c \leftarrow \frac{h_0 c + d_{\rm rl} c_{\rm rl}
+  !!     + d_{\rm bg} b}{h_1},
+  !! \f]
+  !! while the concentrations of the remaining residual layer do not
+  !! change; it is used up once \f$h_1 \ge z\f$. Particles leave a layer
+  !! by random removal and enter the other layer as copies with the
+  !! expected concentration for any particle weighting (see
+  !! scenario_add_sample_copies()), so the particles of the residual
+  !! layer return with their composition and mixing state. The residual
+  !! layer has no emissions, coagulation, dilution or deposition; with
+  !! MOSAIC its chemistry is computed in run_part_timestep() at the
+  !! temperature, pressure and humidity of the mixed layer. Its
+  !! concentrations follow the temperature and pressure of the mixed
+  !! layer, so that its mixing ratios are conserved. Exchange with the
+  !! background at the dilution rate of the background profiles applies
+  !! to the mixed layer only (scenario_update_gas_state() and
+  !! scenario_update_aero_state()).
+  subroutine scenario_update_residual_layer(scenario, delta_t, env_state, &
+       old_env_state, gas_state, aero_data, aero_state, residual_layer, &
+       allow_doubling, allow_halving, n_dil_in, n_dil_out)
+
+    !> Scenario data.
+    type(scenario_t), intent(in) :: scenario
+    !> Time increment to update over.
+    real(kind=dp), intent(in) :: delta_t
+    !> Current environment.
+    type(env_state_t), intent(in) :: env_state
+    !> Previous environment.
+    type(env_state_t), intent(in) :: old_env_state
+    !> Gas state of the mixed layer.
+    type(gas_state_t), intent(inout) :: gas_state
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+    !> Aerosol state of the mixed layer.
+    type(aero_state_t), intent(inout) :: aero_state
+    !> Residual layer.
+    type(residual_layer_t), intent(inout) :: residual_layer
+    !> Whether to allow doubling of the population.
+    logical, intent(in) :: allow_doubling
+    !> Whether to allow halving of the population.
+    logical, intent(in) :: allow_halving
+    !> Number of particles entrained into the mixed layer.
+    integer, intent(out) :: n_dil_in
+    !> Number of particles removed from the mixed layer by dilution.
+    integer, intent(out) :: n_dil_out
+
+    real(kind=dp), parameter :: sample_timescale = 3600.0d0
+    real(kind=dp) :: h_old, h_new, d_rl, f, d_from_rl, d_from_bg
+    real(kind=dp) :: dilution_rate, characteristic_factor
+    type(gas_state_t) :: gas_background
+    type(aero_dist_t) :: aero_background
+    type(aero_state_t) :: aero_state_delta
+    integer :: n_before, n_bg
+
+    n_dil_in = 0
+    n_dil_out = 0
+    h_old = old_env_state%height
+    h_new = env_state%height
+
+    ! the residual layer follows the temperature and pressure of the
+    ! mixed layer, as the mixed layer does in scenario_update_aero_state()
+    call aero_weight_array_scale(residual_layer%aero_state%awa, &
+         old_env_state%temp * env_state%pressure &
+         / (env_state%temp * old_env_state%pressure))
+
+    if (h_new < h_old) then
+       d_rl = max(residual_layer%top - h_old, 0d0)
+       f = (h_old - h_new) / (d_rl + h_old - h_new)
+       if (d_rl == 0d0) then
+          ! empty residual layer: start with the weighting of the mixed layer
+          call aero_state_zero(residual_layer%aero_state)
+          call aero_state_copy_weight(aero_state, residual_layer%aero_state)
+       end if
+       residual_layer%gas_state%mix_rat = (1d0 - f) &
+            * residual_layer%gas_state%mix_rat + f * gas_state%mix_rat
+       ! remove the fraction f of the residual-layer particles ...
+       call aero_state_zero(aero_state_delta)
+       call aero_state_copy_weight(residual_layer%aero_state, &
+            aero_state_delta)
+       call aero_state_sample_particles(residual_layer%aero_state, &
+            aero_state_delta, aero_data, f, AERO_INFO_NONE)
+       ! ... and add copies of the fraction f of the mixed layer
+       call scenario_add_sample_copies(aero_state, &
+            residual_layer%aero_state, aero_data, f)
+       residual_layer%top = max(residual_layer%top, h_old)
+    elseif (h_new > h_old) then
+       d_from_rl = max(min(h_new, residual_layer%top) - h_old, 0d0)
+       d_from_bg = max(h_new - h_old - d_from_rl, 0d0)
+       call gas_state_interp_1d(scenario%gas_background, &
+            scenario%gas_dilution_time, scenario%gas_dilution_rate, &
+            env_state%elapsed_time, gas_background, dilution_rate)
+       gas_state%mix_rat = (h_old * gas_state%mix_rat &
+            + d_from_rl * residual_layer%gas_state%mix_rat &
+            + d_from_bg * gas_background%mix_rat) / h_new
+       ! dilution of the mixed-layer particles ...
+       call aero_state_zero(aero_state_delta)
+       call aero_state_copy_weight(aero_state, aero_state_delta)
+       call aero_state_sample_particles(aero_state, aero_state_delta, &
+            aero_data, 1d0 - h_old / h_new, AERO_INFO_DILUTION)
+       n_dil_out = aero_state_total_particles(aero_state_delta)
+       ! ... particles of the residual layer ...
+       if (d_from_rl > 0d0) then
+          n_before = aero_state_total_particles(aero_state)
+          call scenario_add_sample_copies(residual_layer%aero_state, &
+               aero_state, aero_data, d_from_rl / h_new)
+          n_dil_in = aero_state_total_particles(aero_state) - n_before
+       end if
+       ! ... and background particles above the residual layer
+       if (d_from_bg > 0d0) then
+          call aero_dist_interp_1d(scenario%aero_background, &
+               scenario%aero_dilution_time, scenario%aero_dilution_rate, &
+               env_state%elapsed_time, aero_background, dilution_rate)
+          characteristic_factor = max(1d0, min(sample_timescale, &
+               env_state%elapsed_time)) / delta_t
+          call aero_state_add_aero_dist_sample(aero_state, aero_data, &
+               aero_background, d_from_bg / h_new, characteristic_factor, &
+               env_state%elapsed_time, allow_doubling, allow_halving, n_bg)
+          n_dil_in = n_dil_in + n_bg
+       end if
+       if (h_new >= residual_layer%top) then
+          residual_layer%top = h_new
+          residual_layer%gas_state%mix_rat = 0d0
+          call aero_state_zero(residual_layer%aero_state)
+       end if
+    end if
+
+  end subroutine scenario_update_residual_layer
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1224,6 +1515,8 @@ contains
     type(spec_file_t) :: sub_file
     character(len=SPEC_LINE_MAX_VAR_LEN) :: function_name
     type(spec_line_t) :: line
+    logical :: eof
+    integer :: i
 
     ! note that we have to hard-code the list for doxygen below
 
@@ -1267,6 +1560,20 @@ contains
     !!      If \c loss_function is \c chamber, then the following
     !!      parameters must also be provided:
     !!      - \subpage input_format_chamber
+    !! <li> \b gas_deposition (string, optional): the name of the file
+    !!      from which to read the gas dry deposition profile --- the file
+    !!      format should be \subpage input_format_gas_profile, with dry
+    !!      deposition velocities (m/s) as the species values and
+    !!      dimensionless scalings as the rates. Each gas species is lost
+    !!      at the rate (rate times velocity) / (mixing layer height). If
+    !!      this line is omitted there is no gas dry deposition.
+    !! <li> \b residual_layer (logical, optional): whether the air that
+    !!      leaves the mixed layer when the mixing height falls is kept in
+    !!      a residual layer above it and entrained again, with its
+    !!      particles, when the mixing height rises; above the top of the
+    !!      residual layer the mixed layer entrains background air
+    !!      (particle-resolved runs only). If this line is omitted or \c
+    !!      no, the mixed layer always entrains background air.
     !! </ul>
     !!
     !! See also:
@@ -1351,6 +1658,32 @@ contains
     else
        call spec_file_die_msg(518248400, file, &
             "Unknown loss function type: " // trim(function_name))
+    end if
+
+    ! optional gas dry deposition profile
+    call spec_file_read_line(file, line, eof)
+    if (.not. eof) call spec_file_unread_line(file)
+    if ((.not. eof) .and. (line%name == 'gas_deposition')) then
+       call spec_file_read_string(file, 'gas_deposition', sub_filename)
+       call spec_file_open(sub_filename, sub_file)
+       call spec_file_read_gas_states_times_rates(sub_file, gas_data, &
+            scenario%gas_deposition_time, &
+            scenario%gas_deposition_rate_scale, scenario%gas_deposition)
+       call spec_file_close(sub_file)
+       do i = 1,size(scenario%gas_deposition)
+          call assert_msg(410857123, &
+               all(scenario%gas_deposition(i)%mix_rat >= 0d0), &
+               "negative gas dry deposition velocity in " &
+               // trim(sub_filename))
+       end do
+       call spec_file_read_line(file, line, eof)
+       if (.not. eof) call spec_file_unread_line(file)
+    end if
+
+    ! optional residual layer
+    if ((.not. eof) .and. (line%name == 'residual_layer')) then
+       call spec_file_read_logical(file, 'residual_layer', &
+            scenario%do_residual_layer)
     end if
 
   end subroutine spec_file_read_scenario
@@ -1613,7 +1946,16 @@ contains
          + pmc_mpi_pack_size_real_array(val%aero_dilution_rate) &
          + pmc_mpi_pack_size_integer(val%loss_function_type) &
          + pmc_mpi_pack_size_drydep(val%drydep) &
-         + pmc_mpi_pack_size_chamber(val%chamber)
+         + pmc_mpi_pack_size_chamber(val%chamber) &
+         + pmc_mpi_pack_size_real_array(val%gas_deposition_time) &
+         + pmc_mpi_pack_size_real_array(val%gas_deposition_rate_scale) &
+         + pmc_mpi_pack_size_logical(val%do_residual_layer)
+    if (allocated(val%gas_deposition_time)) then
+       do i = 1,size(val%gas_deposition)
+          total_size = total_size &
+               + pmc_mpi_pack_size_gas_state(val%gas_deposition(i))
+       end do
+    end if
     if (allocated(val%gas_emission_time)) then
        do i = 1,size(val%gas_emission)
           total_size = total_size &
@@ -1677,6 +2019,16 @@ contains
     call pmc_mpi_pack_integer(buffer, position, val%loss_function_type)
     call pmc_mpi_pack_drydep(buffer, position, val%drydep)
     call pmc_mpi_pack_chamber(buffer, position, val%chamber)
+    call pmc_mpi_pack_real_array(buffer, position, val%gas_deposition_time)
+    call pmc_mpi_pack_real_array(buffer, position, &
+         val%gas_deposition_rate_scale)
+    call pmc_mpi_pack_logical(buffer, position, val%do_residual_layer)
+    if (allocated(val%gas_deposition_time)) then
+       do i = 1,size(val%gas_deposition)
+          call pmc_mpi_pack_gas_state(buffer, position, &
+               val%gas_deposition(i))
+       end do
+    end if
     if (allocated(val%gas_emission_time)) then
        do i = 1,size(val%gas_emission)
           call pmc_mpi_pack_gas_state(buffer, position, val%gas_emission(i))
@@ -1738,6 +2090,18 @@ contains
     call pmc_mpi_unpack_integer(buffer, position, val%loss_function_type)
     call pmc_mpi_unpack_drydep(buffer, position, val%drydep)
     call pmc_mpi_unpack_chamber(buffer, position, val%chamber)
+    call pmc_mpi_unpack_real_array(buffer, position, val%gas_deposition_time)
+    call pmc_mpi_unpack_real_array(buffer, position, &
+         val%gas_deposition_rate_scale)
+    call pmc_mpi_unpack_logical(buffer, position, val%do_residual_layer)
+    if (allocated(val%gas_deposition)) deallocate(val%gas_deposition)
+    if (allocated(val%gas_deposition_time)) then
+       allocate(val%gas_deposition(size(val%gas_deposition_time)))
+       do i = 1,size(val%gas_deposition)
+          call pmc_mpi_unpack_gas_state(buffer, position, &
+               val%gas_deposition(i))
+       end do
+    end if
     if (allocated(val%gas_emission)) deallocate(val%gas_emission)
     if (allocated(val%gas_background)) deallocate(val%gas_background)
     if (allocated(val%aero_emission)) deallocate(val%aero_emission)

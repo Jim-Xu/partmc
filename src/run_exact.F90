@@ -64,6 +64,8 @@ contains
     real(kind=dp) :: time
     type(gas_state_t) :: gas_state
 
+    call assert_msg(581720346, .not. scenario%do_residual_layer, &
+         "residual_layer is only supported for run_type particle")
     call check_time_multiple("t_max", run_exact_opt%t_max, &
          "t_output", run_exact_opt%t_output)
 

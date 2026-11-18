@@ -1,0 +1,6 @@
+mode_name back                  # name of mode source
+mass_frac aero_back_comp.dat    # species mass fractions
+diam_type geometric             # type of diameter specified
+mode_type mono                  # type of distribution
+num_conc 2e9                    # particle number concentration (#/m^3)
+diam 4e-5                       # diameter (m)

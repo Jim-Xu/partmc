@@ -186,6 +186,7 @@ contains
     integer :: n_time, i_time, pre_i_time
     integer :: i_state, i_state_netcdf, i_output
     integer :: i_cur, i_next
+    type(residual_layer_t) :: residual_layer
 
     rank = pmc_mpi_rank()
     n_proc = pmc_mpi_size()
@@ -260,6 +261,13 @@ contains
             global_n_part, 0, 0, 0, 0, 0, t_wall_elapsed, t_wall_remain)
     end if
 
+    if (scenario%do_residual_layer) then
+       call assert_msg(201754926, n_proc == 1, &
+            "residual_layer is only supported for a single process")
+       call residual_layer_init(residual_layer, env_state, gas_data, &
+            aero_state)
+    end if
+
     i_cur = 1
     i_next = n_time
     call run_part_timeblock(scenario, env_state, aero_data, aero_state, &
@@ -269,7 +277,8 @@ contains
 #endif
          i_cur, i_next, t_start, last_output_time, last_progress_time, &
          i_output, progress_n_samp, progress_n_coag, progress_n_emit, &
-         progress_n_dil_in, progress_n_dil_out, progress_n_nuc)
+         progress_n_dil_in, progress_n_dil_out, progress_n_nuc, &
+         residual_layer)
 
     if (run_part_opt%do_mosaic) then
        call mosaic_cleanup()
@@ -854,7 +863,7 @@ contains
 #endif
        i_time, t_start, last_output_time, last_progress_time, i_output, &
        progress_n_samp, progress_n_coag, progress_n_emit, progress_n_dil_in, &
-       progress_n_dil_out, progress_n_nuc)
+       progress_n_dil_out, progress_n_nuc, residual_layer)
 
     !> Environment state.
     type(scenario_t), intent(in) :: scenario
@@ -898,6 +907,8 @@ contains
     integer, intent(inout) :: progress_n_dil_out
     !> Number of particles added by nucleation.
     integer, intent(inout) :: progress_n_nuc
+    !> Residual layer (required if \c scenario%%do_residual_layer).
+    type(residual_layer_t), intent(inout), optional :: residual_layer
 
     real(kind=dp) :: prop_done
     integer :: n_samp, n_coag, n_emit, n_dil_in, n_dil_out, n_nuc
@@ -907,7 +918,7 @@ contains
     integer :: global_n_nuc
     logical :: do_output, do_state, do_state_netcdf, do_progress
     real(kind=dp) :: t_wall_now, t_wall_elapsed, t_wall_remain, time
-    type(env_state_t) :: old_env_state
+    type(env_state_t) :: old_env_state, rl_env_state
 #ifdef PMC_USE_CAMP
     type(camp_state_t), pointer :: camp_state
     type(camp_state_t), pointer :: camp_pre_aero_state, camp_post_aero_state
@@ -980,6 +991,16 @@ contains
     progress_n_emit = progress_n_emit + n_emit
     progress_n_dil_in = progress_n_dil_in + n_dil_in
     progress_n_dil_out = progress_n_dil_out + n_dil_out
+    if (scenario%do_residual_layer) then
+       call assert_msg(663015874, present(residual_layer), &
+            "residual_layer requires a residual layer state")
+       call scenario_update_residual_layer(scenario, run_part_opt%del_t, &
+            env_state, old_env_state, gas_state, aero_data, aero_state, &
+            residual_layer, run_part_opt%allow_doubling, &
+            run_part_opt%allow_halving, n_dil_in, n_dil_out)
+       progress_n_dil_in = progress_n_dil_in + n_dil_in
+       progress_n_dil_out = progress_n_dil_out + n_dil_out
+    end if
 
     if (run_part_opt%do_camp_chem) then
 #ifdef PMC_USE_CAMP
@@ -1000,6 +1021,16 @@ contains
     if (run_part_opt%do_mosaic) then
        call mosaic_timestep(env_state, aero_data, aero_state, gas_data, &
             gas_state, run_part_opt%do_optical, run_part_opt%uuid)
+       if (scenario%do_residual_layer) then
+          if (residual_layer%top > env_state%height) then
+             ! chemistry of the residual layer, at the temperature, pressure
+             ! and humidity of the mixed layer
+             rl_env_state = env_state
+             call mosaic_timestep(rl_env_state, aero_data, &
+                  residual_layer%aero_state, gas_data, &
+                  residual_layer%gas_state, .false., run_part_opt%uuid)
+          end if
+       end if
     end if
 
     if (run_part_opt%mix_timescale > 0d0) then
@@ -1088,7 +1119,7 @@ contains
 #endif
        i_cur, i_next, t_start, last_output_time, last_progress_time, &
        i_output, progress_n_samp, progress_n_coag, progress_n_emit, &
-       progress_n_dil_in, progress_n_dil_out, progress_n_nuc)
+       progress_n_dil_in, progress_n_dil_out, progress_n_nuc, residual_layer)
 
     !> Environment state.
     type(scenario_t), intent(in) :: scenario
@@ -1134,6 +1165,8 @@ contains
     integer, intent(inout) :: progress_n_dil_out
     !> Number of particles added by nucleation.
     integer, intent(inout) :: progress_n_nuc
+    !> Residual layer (required if \c scenario%%do_residual_layer).
+    type(residual_layer_t), intent(inout), optional :: residual_layer
 
     integer :: i_time
 
@@ -1145,7 +1178,8 @@ contains
 #endif
             i_time, t_start, last_output_time, last_progress_time, i_output, &
             progress_n_samp, progress_n_coag, progress_n_emit, &
-            progress_n_dil_in, progress_n_dil_out, progress_n_nuc)
+            progress_n_dil_in, progress_n_dil_out, progress_n_nuc, &
+            residual_layer)
     end do
 
   end subroutine run_part_timeblock

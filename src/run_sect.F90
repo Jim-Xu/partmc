@@ -106,6 +106,8 @@ contains
     integer i, j, i_time, num_t, i_summary
     logical do_output, do_progress
 
+    call assert_msg(581720347, .not. scenario%do_residual_layer, &
+         "residual_layer is only supported for run_type particle")
     call check_time_multiple("t_max", run_sect_opt%t_max, &
          "del_t", run_sect_opt%del_t)
     call check_time_multiple("t_output", run_sect_opt%t_output, &

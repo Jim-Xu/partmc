@@ -1,0 +1,6 @@
+# time (s)
+# rate (s^{-1}): no exchange with the background except by entrainment
+# background mixing ratios (ppb)
+time 0
+rate 0
+NO2  5

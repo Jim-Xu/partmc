@@ -1,0 +1,6 @@
+# time (s)
+# rate (1): emissions only during the night (7200 - 14400 s)
+# emissions (mol m^{-2} s^{-1})
+time 0      7200   14400
+rate 0      1      0
+NH3  1e-8   1e-8   1e-8

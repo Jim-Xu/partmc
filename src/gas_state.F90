@@ -381,6 +381,11 @@ contains
     !! - background gas profiles have rates with units s^{-1} that are
     !!   dilution rates and species with units of ppb (parts per
     !!   billion) that are the background mixing ratios
+    !! - dry deposition gas profiles (optional \c gas_deposition in the
+    !!   scenario) have dimensionless rates that are used to scale the
+    !!   species values, which are dry deposition velocities with units
+    !!   of m/s --- each species is lost at the first-order rate
+    !!   (rate times velocity) / (mixing layer height)
     !!
     !! The species names must be those specified by the \ref
     !! input_format_gas_data. Any species not listed are taken to be

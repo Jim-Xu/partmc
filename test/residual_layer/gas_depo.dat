@@ -1,0 +1,7 @@
+# time (s)
+# rate (1): scaling of the deposition velocities
+# dry deposition velocities (m s^{-1}); HNO3 deposits only while the
+# mixing height is constant, all other species never deposit
+time 0      3600   7200   14400  25200
+rate 1      1      1      1      2
+HNO3 0.01   0      0.005  0      0.01

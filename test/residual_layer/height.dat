@@ -1,0 +1,5 @@
+# time (s)
+# mixing layer height (m): 1000 m, evening collapse to 200 m (1-2 h),
+# shallow night layer (2-4 h), morning growth to 1500 m (4-6 h)
+time   0      3600   7200   14400  21600  32400
+height 1000   1000   200    200    1500   1500
