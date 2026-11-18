@@ -5,7 +5,7 @@ This scenario is the test bed for the organic aerosol scheme of MOSAIC: every fo
 
 The case that is set up here is an urban plume. It takes the meteorology, the initial and background conditions, the emissions of inorganic gases and CBM-Z organic gases and the particle size distributions from the `1_urban_plume` scenario and adds the emissions of the precursors of the organic aerosol. Other cases (chamber experiments, biogenic or biomass-burning environments) can be set up in the same way by replacing the input files.
 
-The organic aerosol scheme follows the `cb6r5_ae7_aq` mechanism (AERO7) of CMAQ: SOA from aromatics, long alkanes, monoterpenes (including organic nitrates), isoprene (including the reactive uptake of the epoxydiol and of methylglyoxal) and sesquiterpenes, particle-phase oligomerization, semivolatile primary organic aerosol (POA) with OH aging, and potential SOA from combustion emissions.
+The organic aerosol scheme follows the `cb6r5_ae7_aq` mechanism (AERO7) of CMAQ: SOA from aromatics, long alkanes, monoterpenes (including organic nitrates), isoprene (including the reactive uptake of the epoxydiol and of methylglyoxal) and sesquiterpenes, particle-phase oligomerization, semivolatile primary organic aerosol (POA) with OH aging, and potential SOA from combustion emissions. Unlike in CMAQ, the potential combustion SOA has a fresh class `APCSO` (O:C 0.51) and an aged class `APCSO2` (O:C 1.28); the fresh class turns into the aged one by OH (1.03e-11 cm³ s⁻¹ × [OH], mass conserving), so that the O:C of urban SOA rises with photochemical age as in the SIMPLE parameterization of Hodzic and Jimenez (2011), with the calibration factor of Hayes et al. (2015).
 
 ## Emissions
 
@@ -53,6 +53,10 @@ and one file per output time with the two-dimensional number distributions of dr
 A. Borbon et al. (2013) Emission ratios of anthropogenic volatile organic compounds in northern mid-latitude megacities: Observations versus emission inventories in Los Angeles and Paris, _J. Geophys. Res. Atmos._ 118, 2041-2057, DOI: <http://dx.doi.org/10.1002/jgrd.50059>.
 
 A. B. Guenther et al. (2012) The Model of Emissions of Gases and Aerosols from Nature version 2.1 (MEGAN2.1): an extended and updated framework for modeling biogenic emissions, _Geosci. Model Dev._ 5, 1471-1492, DOI: <http://dx.doi.org/10.5194/gmd-5-1471-2012>.
+
+P. L. Hayes et al. (2015) Modeling the formation and aging of secondary organic aerosols in Los Angeles during CalNex 2010, _Atmos. Chem. Phys._ 15, 5773-5801, DOI: <http://dx.doi.org/10.5194/acp-15-5773-2015>.
+
+A. Hodzic and J. L. Jimenez (2011) Modeling anthropogenically controlled secondary organic aerosols in a megacity: a simplified framework for global and climate models, _Geosci. Model Dev._ 4, 901-917, DOI: <http://dx.doi.org/10.5194/gmd-4-901-2011>.
 
 B. N. Murphy et al. (2017) Semivolatile POA and parameterized total combustion SOA in CMAQv5.2: impacts on source strength and partitioning, _Atmos. Chem. Phys._ 17, 11107-11133, DOI: <http://dx.doi.org/10.5194/acp-17-11107-2017>.
 

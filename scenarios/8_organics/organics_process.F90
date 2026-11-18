@@ -79,8 +79,8 @@ program process
   group_spec(1:1,5) = [character(len=AERO_NAME_LEN) :: "AOLGB"]
   ! SOA from the uptake of glyoxal and methylglyoxal
   group_spec(1:1,6) = [character(len=AERO_NAME_LEN) :: "AGLY"]
-  ! potential SOA from combustion emissions
-  group_spec(1:1,7) = [character(len=AERO_NAME_LEN) :: "APCSO"]
+  ! potential SOA from combustion emissions, fresh and aged by OH
+  group_spec(1:2,7) = [character(len=AERO_NAME_LEN) :: "APCSO", "APCSO2"]
   ! primary organic matter
   group_spec(1:6,8) = [character(len=AERO_NAME_LEN) :: &
        "ALVPO1", "ASVPO1", "ASVPO2", "ASVPO3", "AIVPO1", "OC"]

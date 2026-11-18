@@ -73,7 +73,8 @@ contains
          jphoto_aone, jphoto_mgly, jphoto_open, jphoto_rooh, jphoto_onit, &
          jphoto_isoprd
 
-    use module_data_mosaic_soa, only: nsoa, soa_name_a, soa_mw
+    use module_data_mosaic_soa, only: nsoa, nsoa_sv, soa_name_a, soa_mw, &
+         nsoa_prxn, soa_prxn_from, soa_prxn_to, lsv_pcso, lnv_pcso2
 #endif
 
     !> Environment state.
@@ -91,7 +92,8 @@ contains
          photolysis_rates(MOSAIC_N_PHOTOLYSIS)
 
 #ifdef PMC_USE_MOSAIC
-    integer :: i_soa, i_spec
+    integer :: i_soa, i_spec, i_rxn
+    character(len=8) :: rxn_from(nsoa_prxn + 1), rxn_to(nsoa_prxn + 1)
 
     ! MOSAIC function interfaces
     interface
@@ -194,6 +196,24 @@ contains
                // trim(real_to_string(aero_data%molec_weight(i_spec))) &
                // " kg/mol) differs from the MOSAIC value (" &
                // trim(real_to_string(soa_mw(i_soa) * 1d-3)) // " kg/mol)")
+       end if
+    end do
+
+    ! the products of the particle-phase reactions of the organic species
+    ! (oligomerization, nitrate hydrolysis, aging of potential combustion
+    ! SOA) must be aerosol species too, or the mass that reacts is lost
+    rxn_from(1:nsoa_prxn) = soa_name_a(soa_prxn_from)
+    rxn_to(1:nsoa_prxn) = soa_name_a(nsoa_sv + soa_prxn_to)
+    rxn_from(nsoa_prxn + 1) = soa_name_a(lsv_pcso)
+    rxn_to(nsoa_prxn + 1) = soa_name_a(nsoa_sv + lnv_pcso2)
+    do i_rxn = 1,nsoa_prxn + 1
+       if ((aero_data_spec_by_name(aero_data, trim(rxn_from(i_rxn))) > 0) &
+            .and. (aero_data_spec_by_name(aero_data, trim(rxn_to(i_rxn))) &
+            <= 0)) then
+          call warn_msg(518263309, "aerosol species " &
+               // trim(rxn_from(i_rxn)) // " reacts to " &
+               // trim(rxn_to(i_rxn)) // " in MOSAIC, which is not an " &
+               // "aerosol species: the mass that reacts is lost")
        end if
     end do
 
