@@ -82,7 +82,7 @@ contains
 
     use module_data_mosaic_soa, only: nsoa, nsoa_sv, soa_name_a, soa_mw, &
          nsoa_prxn, soa_prxn_from, soa_prxn_to, lsv_pcso, lnv_pcso2, &
-         soa_iepox_acidity
+         lsv_mtno3, lsv_mtno3h, soa_iepox_acidity
 #endif
 
     !> Environment state.
@@ -236,6 +236,20 @@ contains
                // "aerosol species: the mass that reacts is lost")
        end if
     end do
+
+    ! the monoterpene nitrate is formed as a stable and a hydrolyzable
+    ! species; both must be aerosol species, or the hydrolyzable part
+    ! that partitions to the particles is lost
+    if ((aero_data_spec_by_name(aero_data, &
+         trim(soa_name_a(lsv_mtno3))) > 0) &
+         .and. (aero_data_spec_by_name(aero_data, &
+         trim(soa_name_a(lsv_mtno3h))) <= 0)) then
+       call warn_msg(660418332, "aerosol species " &
+            // trim(soa_name_a(lsv_mtno3)) // " is present without " &
+            // trim(soa_name_a(lsv_mtno3h)) // ", the hydrolyzable " &
+            // "monoterpene nitrate of MOSAIC: the part of the nitrate " &
+            // "that is formed as this species is lost")
+    end if
 
 #endif
 
