@@ -34,10 +34,12 @@ GAS_SCALING = [
     ("BENZ", "CO", 1.3e-3),
     # terpenes relative to isoprene, from the global annual emissions
     # of MEGAN2.1 (Guenther et al., 2012, Table 6):
-    # isoprene 535 Tg, alpha-pinene 66.1 Tg, all other monoterpenes
-    # 96.2 Tg, sesquiterpenes 29.0 Tg
+    # isoprene 535 Tg, alpha-pinene 66.1 Tg, beta-pinene 18.9 Tg and
+    # camphene 4.0 Tg (both react slowly with ozone; BPIN), all other
+    # monoterpenes 73.3 Tg, sesquiterpenes 29.0 Tg
     ("API", "ISOP", (66.1 / 136.24) / (535.0 / 68.12)),
-    ("LIM", "ISOP", (96.2 / 136.24) / (535.0 / 68.12)),
+    ("BPIN", "ISOP", (22.9 / 136.24) / (535.0 / 68.12)),
+    ("LIM", "ISOP", (73.3 / 136.24) / (535.0 / 68.12)),
     ("SESQ", "ISOP", (29.0 / 204.36) / (535.0 / 68.12)),
 ]
 
