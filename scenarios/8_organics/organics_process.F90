@@ -20,7 +20,7 @@ program process
   !> Number of groups of organic species.
   integer, parameter :: N_GROUP = 9
   !> Maximum number of species per group.
-  integer, parameter :: N_GROUP_SPEC = 9
+  integer, parameter :: N_GROUP_SPEC = 10
   !> Names of the groups (used in the names of the output variables).
   character(len=20), parameter :: GROUP_NAME(N_GROUP) = [ &
        character(len=20) :: "soa_anthro", "soa_monoterpene", &
@@ -67,10 +67,11 @@ program process
   ! SOA from benzene, toluene, xylene, naphthalene and long alkanes
   group_spec(1:5,1) = [character(len=AERO_NAME_LEN) :: &
        "AAVB1", "AAVB2", "AAVB3", "AAVB4", "AOLGA"]
-  ! SOA from monoterpenes, including the organic nitrates
-  group_spec(1:9,2) = [character(len=AERO_NAME_LEN) :: &
+  ! SOA from monoterpenes, including the organic nitrates and the
+  ! photolysis product
+  group_spec(1:10,2) = [character(len=AERO_NAME_LEN) :: &
        "AMT1", "AMT2", "AMT3", "AMT4", "AMT5", "AMT6", "AMTNO3", "AMTNO3H", &
-       "AMTHYD"]
+       "AMTHYD", "AMTN1"]
   ! SOA from isoprene, including the uptake of the epoxydiol
   group_spec(1:3,3) = [character(len=AERO_NAME_LEN) :: &
        "AISO1", "AISO2", "AISO3"]

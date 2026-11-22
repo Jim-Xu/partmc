@@ -40,7 +40,7 @@ module pmc_aero_data
   !! older species data files are still interpreted correctly), the
   !! primary organic carbon OC, and the organic species of the VBS-style
   !! SOA scheme in MOSAIC (CMAQ AERO7 names).
-  character(len=AERO_NAME_LEN), parameter :: AERO_ORGANIC_SPEC_NAME(42) = &
+  character(len=AERO_NAME_LEN), parameter :: AERO_ORGANIC_SPEC_NAME(43) = &
        [character(len=AERO_NAME_LEN) :: &
        "MSA",    "ARO1",   "ARO2",   "ALK1",   "OLE1", &
        "API1",   "API2",   "LIM1",   "LIM2",   "OC", &
@@ -50,7 +50,7 @@ module pmc_aero_data
        "ASVPO1", "ASVPO2", "ASVPO3", "AIVPO1", "ALVOO1", &
        "ALVOO2", "ASVOO1", "ASVOO2", "ASVOO3", "APCSO", &
        "AOLGA",  "AOLGB",  "AMTHYD", "AISO3",  "AGLY", &
-       "APCSO2", "AMTNO3H"]
+       "APCSO2", "AMTNO3H", "AMTN1"]
 
   !> Aerosol material properties and associated data.
   !!
@@ -425,9 +425,10 @@ contains
     ! the nonvolatile inorganic and primary species, and the nonvolatile
     ! organic species. The organic species are those of the VBS-style
     ! SOA scheme (CMAQ AERO7 names), which replaced the SORGAM species,
-    ! the aged potential combustion SOA APCSO2 and the hydrolyzable
-    ! monoterpene nitrate AMTNO3H.
-    integer, parameter :: n_mosaic_spec = 43
+    ! the aged potential combustion SOA APCSO2, the hydrolyzable
+    ! monoterpene nitrate AMTNO3H and the photolysis product of the
+    ! monoterpene SOA, AMTN1.
+    integer, parameter :: n_mosaic_spec = 44
     character(AERO_NAME_LEN), parameter, dimension(n_mosaic_spec) :: &
          mosaic_spec_name = [character(len=AERO_NAME_LEN) :: &
          "SO4",    "NO3",    "Cl",     "NH4",    "MSA", &
@@ -436,7 +437,7 @@ contains
          "AMTNO3", "AISO1",  "AISO2",  "ASQT",   "ALVPO1", &
          "ASVPO1", "ASVPO2", "ASVPO3", "AIVPO1", "ALVOO1", &
          "ALVOO2", "ASVOO1", "ASVOO2", "ASVOO3", "APCSO", &
-         "AMTNO3H", &
+         "AMTNO3H", "AMTN1", &
          "CO3",    "Na",     "Ca",     "OIN",    "OC", &
          "BC",     "AOLGA",  "AOLGB",  "AMTHYD", "AISO3", &
          "AGLY",   "APCSO2"]

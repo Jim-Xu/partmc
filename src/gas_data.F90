@@ -160,7 +160,7 @@ contains
     ! SOA scheme (CMAQ AERO7 names, replacing the SORGAM species), and
     ! the urban, biogenic and marine mechanisms. The urban and biogenic
     ! mechanisms include the SOA precursors and SOA tracer species.
-    integer, parameter :: n_mosaic_species = 110
+    integer, parameter :: n_mosaic_species = 111
     character(len=GAS_NAME_LEN), parameter, dimension(n_mosaic_species) &
          :: mosaic_species = [character(len=GAS_NAME_LEN) :: &
          "H2SO4",        "HNO3",         "HCl",          "NH3", &
@@ -177,7 +177,7 @@ contains
          "SVISO2",       "SVSQT",        "VLVPO1",       "VSVPO1", &
          "VSVPO2",       "VSVPO3",       "VIVPO1",       "VLVOO1", &
          "VLVOO2",       "VSVOO1",       "VSVOO2",       "VSVOO3", &
-         "LVPCSOG",      "MTNO3H", &
+         "LVPCSOG",      "MTNO3H",       "VMTN1", &
          "PAR",          "AONE",         "MGLY",         "ETH", &
          "OLET",         "OLEI",         "TOL",          "XYL", &
          "CRES",         "TO2",          "CRO",          "OPEN", &

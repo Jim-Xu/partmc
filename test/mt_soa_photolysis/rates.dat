@@ -1,0 +1,22 @@
+# fixed photolysis rates: only NO2 (the photolysis of the monoterpene SOA in MOSAIC is 1% of this rate)
+# reaction  rate (s^{-1})
+NO2        0.008
+NO3        0.0
+HONO       0.0
+HNO3       0.0
+HNO4       0.0
+N2O5       0.0
+O3_O3P     0.0
+O3_O1D     0.0
+H2O2       0.0
+HCHO_R     0.0
+HCHO_M     0.0
+CH3OOH     0.0
+ETHOOH     0.0
+ALD2       0.0
+AONE       0.0
+MGLY       0.0
+OPEN       0.0
+ROOH       0.0
+ONIT       0.0
+ISOPRD     0.0

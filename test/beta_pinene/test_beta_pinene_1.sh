@@ -12,7 +12,7 @@ mkdir -p out
 ../../partmc run_part.spec
 ../../extract_gas out/beta_pinene_0001
 
-# O3 (column 12) and BPIN (column 100) against the analytic solution of
+# O3 (column 12) and BPIN (column 101) against the analytic solution of
 # BPIN + O3 with the IUPAC rate constant
 ../../numeric_diff --by col --min-col 12 --max-col 12 --rel-tol 1e-4 ref_beta_pinene_gas.txt out/beta_pinene_0001_gas.txt
-../../numeric_diff --by col --min-col 100 --max-col 100 --rel-tol 1e-4 ref_beta_pinene_gas.txt out/beta_pinene_0001_gas.txt
+../../numeric_diff --by col --min-col 101 --max-col 101 --rel-tol 1e-4 ref_beta_pinene_gas.txt out/beta_pinene_0001_gas.txt

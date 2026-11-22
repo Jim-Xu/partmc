@@ -82,7 +82,8 @@ contains
 
     use module_data_mosaic_soa, only: nsoa, nsoa_sv, soa_name_a, soa_mw, &
          nsoa_prxn, soa_prxn_from, soa_prxn_to, lsv_pcso, lnv_pcso2, &
-         lsv_mtno3, lsv_mtno3h, soa_iepox_acidity
+         lsv_mtno3, lsv_mtno3h, lsv_mt1, lsv_mt6, lsv_mtn1, &
+         soa_cstar_298, soa_iepox_acidity
 #endif
 
     !> Environment state.
@@ -104,8 +105,8 @@ contains
     integer, intent(in), optional :: iepox_acidity
 
 #ifdef PMC_USE_MOSAIC
-    integer :: i_soa, i_spec, i_rxn
-    character(len=8) :: rxn_from(nsoa_prxn + 1), rxn_to(nsoa_prxn + 1)
+    integer :: i_soa, i_spec, i_rxn, n_rxn
+    character(len=8) :: rxn_from(nsoa_prxn + 7), rxn_to(nsoa_prxn + 7)
 
     ! MOSAIC function interfaces
     interface
@@ -221,12 +222,23 @@ contains
 
     ! the products of the particle-phase reactions of the organic species
     ! (oligomerization, nitrate hydrolysis, aging of potential combustion
-    ! SOA) must be aerosol species too, or the mass that reacts is lost
+    ! SOA, photolysis of the monoterpene SOA) must be aerosol species too,
+    ! or the mass that reacts is lost
     rxn_from(1:nsoa_prxn) = soa_name_a(soa_prxn_from)
     rxn_to(1:nsoa_prxn) = soa_name_a(nsoa_sv + soa_prxn_to)
     rxn_from(nsoa_prxn + 1) = soa_name_a(lsv_pcso)
     rxn_to(nsoa_prxn + 1) = soa_name_a(nsoa_sv + lnv_pcso2)
-    do i_rxn = 1,nsoa_prxn + 1
+    n_rxn = nsoa_prxn + 1
+    do i_soa = lsv_mt1,lsv_mt6
+       ! the monoterpene SOA species that photolyze: those not more
+       ! volatile than the product
+       if (soa_cstar_298(i_soa) <= soa_cstar_298(lsv_mtn1)) then
+          n_rxn = n_rxn + 1
+          rxn_from(n_rxn) = soa_name_a(i_soa)
+          rxn_to(n_rxn) = soa_name_a(lsv_mtn1)
+       end if
+    end do
+    do i_rxn = 1,n_rxn
        if ((aero_data_spec_by_name(aero_data, trim(rxn_from(i_rxn))) > 0) &
             .and. (aero_data_spec_by_name(aero_data, trim(rxn_to(i_rxn))) &
             <= 0)) then
