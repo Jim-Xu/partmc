@@ -12,7 +12,9 @@ mkdir -p out
 ../../partmc run_part.spec
 ../../extract_gas out/beta_pinene_0001
 
-# O3 (column 12) and BPIN (column 101) against the analytic solution of
-# BPIN + O3 with the IUPAC rate constant
-../../numeric_diff --by col --min-col 12 --max-col 12 --rel-tol 1e-4 ref_beta_pinene_gas.txt out/beta_pinene_0001_gas.txt
+# BPIN (column 101) against the analytic solution of BPIN + O3 with the IUPAC
+# rate constant
 ../../numeric_diff --by col --min-col 101 --max-col 101 --rel-tol 1e-4 ref_beta_pinene_gas.txt out/beta_pinene_0001_gas.txt
+# O3 (column 12): the HO2 formed from the OH of the reaction consumes some more
+# O3 than the analytic solution (0.06 ppb of 100 ppb)
+../../numeric_diff --by col --min-col 12 --max-col 12 --rel-tol 1e-3 ref_beta_pinene_gas.txt out/beta_pinene_0001_gas.txt

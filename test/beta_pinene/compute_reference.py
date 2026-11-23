@@ -3,8 +3,8 @@
 
 Writes ref_beta_pinene_gas.txt in the column layout of extract_gas (time and
 one column per gas species of gas_data.dat), with the analytic mixing ratios
-of O3 and BPIN and zeros in all other columns. In the dark and without other
-reactive gases the only reaction is
+of O3 and BPIN and zeros in all other columns. In the dark, and with CO in
+excess to take the OH that the reaction forms, BPIN is lost only by
 
     BPIN + O3 -> products,    k = 1.39e-15 exp(-1280 / T) cm3 molecule-1 s-1
 
