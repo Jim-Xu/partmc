@@ -434,6 +434,13 @@ contains
     !!     particles, applied to every particle with an aqueous phase,
     !!     as CMAQ does for each of its modes, or \c mosaic for MOSAIC's
     !!     own acidity of each particle
+    !!   - \b ho2_uptake_coeff (real, dimensionless, optional): the
+    !!     uptake coefficient of HO2 on the particles, between 0 and 1.
+    !!     HO2 is lost on the wet surface of every particle without
+    !!     products, limited by gas-phase diffusion, as in the CRACMM3
+    !!     mechanism of CMAQ 6.0. The default if this line is omitted
+    !!     is 0.2, the value of CMAQ; 0 switches the loss off. The line
+    !!     comes after \c iepox_acidity if both are given
     !! - \b do_nucleation (logical): whether to perform particle
     !!   nucleation. If \c do_nucleation is \c yes, then the following
     !!   parameters must also be provided:

@@ -104,6 +104,8 @@ module pmc_run_part
      !> Acidity of the acid-catalyzed IEPOX uptake in MOSAIC
      !> (MOSAIC_IEPOX_ACIDITY_ISORROPIA or MOSAIC_IEPOX_ACIDITY_MOSAIC).
      integer :: iepox_acidity = MOSAIC_IEPOX_ACIDITY_ISORROPIA
+     !> Uptake coefficient of HO2 on the particles in MOSAIC (1).
+     real(kind=dp) :: ho2_uptake_coeff = MOSAIC_HO2_UPTAKE_COEFF_DEFAULT
      !> Whether to have explicitly selected weighting.
      logical :: do_select_weighting
      !> Type of particle weighting scheme.
@@ -217,11 +219,13 @@ contains
        if (run_part_opt%do_fixed_photolysis) then
           call mosaic_init(env_state, aero_data, run_part_opt%del_t, &
                run_part_opt%do_optical, run_part_opt%photolysis_rates, &
-               iepox_acidity=run_part_opt%iepox_acidity)
+               iepox_acidity=run_part_opt%iepox_acidity, &
+               ho2_uptake_coeff=run_part_opt%ho2_uptake_coeff)
        else
           call mosaic_init(env_state, aero_data, run_part_opt%del_t, &
                run_part_opt%do_optical, &
-               iepox_acidity=run_part_opt%iepox_acidity)
+               iepox_acidity=run_part_opt%iepox_acidity, &
+               ho2_uptake_coeff=run_part_opt%ho2_uptake_coeff)
        end if
        if (run_part_opt%do_optical) then
           call mosaic_aero_optical_init(env_state, aero_data, &
@@ -371,6 +375,7 @@ contains
          + pmc_mpi_pack_size_logical(val%do_fixed_photolysis) &
          + pmc_mpi_pack_size_real_array(val%photolysis_rates) &
          + pmc_mpi_pack_size_integer(val%iepox_acidity) &
+         + pmc_mpi_pack_size_real(val%ho2_uptake_coeff) &
          + pmc_mpi_pack_size_logical(val%do_select_weighting) &
          + pmc_mpi_pack_size_integer(val%weighting_type) &
          + pmc_mpi_pack_size_real(val%weighting_exponent) &
@@ -434,6 +439,7 @@ contains
     call pmc_mpi_pack_logical(buffer, position, val%do_fixed_photolysis)
     call pmc_mpi_pack_real_array(buffer, position, val%photolysis_rates)
     call pmc_mpi_pack_integer(buffer, position, val%iepox_acidity)
+    call pmc_mpi_pack_real(buffer, position, val%ho2_uptake_coeff)
     call pmc_mpi_pack_logical(buffer, position, val%do_select_weighting)
     call pmc_mpi_pack_integer(buffer, position, val%weighting_type)
     call pmc_mpi_pack_real(buffer, position, val%weighting_exponent)
@@ -498,6 +504,7 @@ contains
     call pmc_mpi_unpack_logical(buffer, position, val%do_fixed_photolysis)
     call pmc_mpi_unpack_real_array(buffer, position, val%photolysis_rates)
     call pmc_mpi_unpack_integer(buffer, position, val%iepox_acidity)
+    call pmc_mpi_unpack_real(buffer, position, val%ho2_uptake_coeff)
     call pmc_mpi_unpack_logical(buffer, position, val%do_select_weighting)
     call pmc_mpi_unpack_integer(buffer, position, val%weighting_type)
     call pmc_mpi_unpack_real(buffer, position, val%weighting_exponent)
@@ -761,6 +768,19 @@ contains
              call spec_file_die_msg(637481920, file, &
                   "unknown iepox_acidity: " // trim(iepox_acidity_name) &
                   // " (must be isorropia or mosaic)")
+          end if
+       end if
+       ! optional uptake coefficient of HO2 on the particles
+       run_part_opt%ho2_uptake_coeff = MOSAIC_HO2_UPTAKE_COEFF_DEFAULT
+       call spec_file_read_line(file, line, eof)
+       if (.not. eof) call spec_file_unread_line(file)
+       if ((.not. eof) .and. (line%name == 'ho2_uptake_coeff')) then
+          call spec_file_read_real(file, 'ho2_uptake_coeff', &
+               run_part_opt%ho2_uptake_coeff)
+          if ((run_part_opt%ho2_uptake_coeff < 0d0) &
+               .or. (run_part_opt%ho2_uptake_coeff > 1d0)) then
+             call spec_file_die_msg(905317264, file, &
+                  "ho2_uptake_coeff must be between 0 and 1")
           end if
        end if
     else

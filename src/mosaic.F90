@@ -43,6 +43,16 @@ module pmc_mosaic
   !> calculation on the totals of gases and particles, as in CMAQ.
   integer, parameter :: MOSAIC_IEPOX_ACIDITY_ISORROPIA = 1
 
+  !> Default uptake coefficient of HO2 on the particles (CMAQ 6.0).
+  real(kind=dp), parameter :: MOSAIC_HO2_UPTAKE_COEFF_DEFAULT = 0.2d0
+  !> Molecular weight of HO2 (kg/mol).
+  real(kind=dp), parameter :: MOSAIC_HO2_MOLEC_WEIGHT = 33.01d-3
+
+  !> Uptake coefficient of HO2 on the particles (1), set by
+  !> mosaic_init().
+  real(kind=dp), save :: mosaic_ho2_uptake_coeff &
+       = MOSAIC_HO2_UPTAKE_COEFF_DEFAULT
+
 contains
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -62,7 +72,7 @@ contains
 
   !> Initialize all MOSAIC data-structures.
   subroutine mosaic_init(env_state, aero_data, del_t, do_optical, &
-       photolysis_rates, iepox_acidity)
+       photolysis_rates, iepox_acidity, ho2_uptake_coeff)
 
 #ifdef PMC_USE_MOSAIC
     use module_data_mosaic_aero, only: alpha_ASTEM, rtol_eqb_ASTEM, &
@@ -103,6 +113,9 @@ contains
     !> (MOSAIC_IEPOX_ACIDITY_ISORROPIA or MOSAIC_IEPOX_ACIDITY_MOSAIC);
     !> MOSAIC's default (ISORROPIA) if not present.
     integer, intent(in), optional :: iepox_acidity
+    !> Uptake coefficient of HO2 on the particles (1);
+    !> MOSAIC_HO2_UPTAKE_COEFF_DEFAULT if not present, 0 for no uptake.
+    real(kind=dp), intent(in), optional :: ho2_uptake_coeff
 
 #ifdef PMC_USE_MOSAIC
     integer :: i_soa, i_spec, i_rxn, n_rxn
@@ -126,6 +139,14 @@ contains
             .or. (iepox_acidity == MOSAIC_IEPOX_ACIDITY_ISORROPIA), &
             "unknown acidity of the IEPOX uptake")
        soa_iepox_acidity = iepox_acidity
+    end if
+
+    mosaic_ho2_uptake_coeff = MOSAIC_HO2_UPTAKE_COEFF_DEFAULT
+    if (present(ho2_uptake_coeff)) then
+       call assert_msg(672149503, &
+            (ho2_uptake_coeff >= 0d0) .and. (ho2_uptake_coeff <= 1d0), &
+            "the uptake coefficient of HO2 must be between 0 and 1")
+       mosaic_ho2_uptake_coeff = ho2_uptake_coeff
     end if
 
     ! allocate one aerosol bin
@@ -630,6 +651,7 @@ contains
 
 #ifdef PMC_USE_MOSAIC
     use module_data_mosaic_main, only: msolar
+    use module_data_mosaic_soa, only: soa_k_ho2
 #endif
 
     !> Environment state.
@@ -672,6 +694,10 @@ contains
       call SolarZenithAngle
     end if
 
+    ! loss of HO2 on the particles of this timestep
+    soa_k_ho2 = mosaic_ho2_uptake_freq(env_state, aero_data, aero_state, &
+         mosaic_ho2_uptake_coeff)
+
     call IntegrateChemistry
 
     ! map MOSAIC -> PartMC
@@ -688,6 +714,62 @@ contains
 #endif
 
   end subroutine mosaic_timestep
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> First-order loss frequency of HO2 on the particles (s^{-1}).
+  !!
+  !! The loss is that of the CRACMM3 mechanism of CMAQ 6.0 (reaction
+  !! HET_HO2: HO2 gives no products), limited by gas-phase diffusion
+  !! and by the uptake coefficient \f$\gamma\f$:
+  !! \f[
+  !!     k = \sum_i n_i \frac{\pi D_i^2}{D_i / (2 D_{\rm g})
+  !!         + 4 / (\bar{c} \gamma)}
+  !! \f]
+  !! where \f$n_i\f$ is the number concentration and \f$D_i\f$ the wet
+  !! diameter of particle \f$i\f$, \f$\bar{c}\f$ the mean molecular
+  !! speed of HO2 and \f$D_{\rm g}\f$ the gas-phase diffusivity. CMAQ
+  !! uses the diffusivity of N2O5 for its uptake reactions (8.55e-6
+  !! m^2/s at 273.15 K and 1 atm) and the wet surface area and
+  !! effective diameter of its accumulation mode; here the sum is over
+  !! all particles.
+  real(kind=dp) function mosaic_ho2_uptake_freq(env_state, aero_data, &
+       aero_state, uptake_coeff)
+
+    !> Environment state.
+    type(env_state_t), intent(in) :: env_state
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+    !> Aerosol state.
+    type(aero_state_t), intent(in) :: aero_state
+    !> Uptake coefficient of HO2 (1).
+    real(kind=dp), intent(in) :: uptake_coeff
+
+    !> Gas-phase diffusivity at 273.15 K and 1 atm (m^2/s), as in CMAQ.
+    real(kind=dp), parameter :: DIFFUSIVITY_STD = 0.0855d-4
+
+    integer :: i_part
+    real(kind=dp) :: diffusivity, speed, diameter, freq
+
+    freq = 0d0
+    if (uptake_coeff > 0d0) then
+       diffusivity = DIFFUSIVITY_STD * (env_state%temp / 273.15d0)**1.75d0 &
+            * const%air_std_press / env_state%pressure
+       speed = sqrt(8d0 * const%univ_gas_const * env_state%temp &
+            / (const%pi * MOSAIC_HO2_MOLEC_WEIGHT))
+       do i_part = 1,aero_state_n_part(aero_state)
+          diameter = aero_particle_diameter( &
+               aero_state%apa%particle(i_part), aero_data)
+          freq = freq + aero_state_particle_num_conc(aero_state, &
+               aero_state%apa%particle(i_part), aero_data) &
+               * const%pi * diameter**2 &
+               / (diameter / (2d0 * diffusivity) &
+               + 4d0 / (speed * uptake_coeff))
+       end do
+    end if
+    mosaic_ho2_uptake_freq = freq
+
+  end function mosaic_ho2_uptake_freq
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
