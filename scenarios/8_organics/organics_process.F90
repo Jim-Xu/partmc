@@ -18,17 +18,16 @@ program process
        = "out/organics"
 
   !> Number of groups of organic species.
-  integer, parameter :: N_GROUP = 9
+  integer, parameter :: N_GROUP = 6
   !> Maximum number of species per group.
-  integer, parameter :: N_GROUP_SPEC = 10
+  integer, parameter :: N_GROUP_SPEC = 14
   !> Names of the groups (used in the names of the output variables).
   character(len=20), parameter :: GROUP_NAME(N_GROUP) = [ &
-       character(len=20) :: "soa_anthro", "soa_monoterpene", &
-       "soa_isoprene", "soa_sesquiterpene", "soa_bio_oligomer", &
-       "soa_glyoxal", "soa_combustion", "poa", "oxidized_poa"]
+       character(len=20) :: "poa", "soa_roc", "soa_monoterpene", &
+       "soa_isoprene", "soa_glyoxal", "soa_cloud"]
   !> Whether the groups are secondary organic matter.
-  logical, parameter :: GROUP_SECONDARY(N_GROUP) = [.true., .true., &
-       .true., .true., .true., .true., .true., .false., .true.]
+  logical, parameter :: GROUP_SECONDARY(N_GROUP) = [.false., .true., &
+       .true., .true., .true., .true.]
 
   character(len=PMC_MAX_FILENAME_LEN) :: in_filename, out_filename
   type(bin_grid_t) :: diam_grid, o_c_grid, frac_grid
@@ -63,32 +62,37 @@ program process
 
   allocate(times(n_index))
 
+  ! groups of the organic aerosol species of CRACMM3, as in the species
+  ! definition file of CMAQ (SpecDef_Conc_cracmm3.txt)
   group_spec = ""
-  ! SOA from benzene, toluene, xylene, naphthalene and long alkanes
-  group_spec(1:5,1) = [character(len=AERO_NAME_LEN) :: &
-       "AAVB1", "AAVB2", "AAVB3", "AAVB4", "AOLGA"]
-  ! SOA from monoterpenes, including the organic nitrates and the
-  ! photolysis product
-  group_spec(1:10,2) = [character(len=AERO_NAME_LEN) :: &
-       "AMT1", "AMT2", "AMT3", "AMT4", "AMT5", "AMT6", "AMTNO3", "AMTNO3H", &
-       "AMTHYD", "AMTN1"]
-  ! SOA from isoprene, including the uptake of the epoxydiol
-  group_spec(1:3,3) = [character(len=AERO_NAME_LEN) :: &
-       "AISO1", "AISO2", "AISO3"]
-  ! SOA from sesquiterpenes
-  group_spec(1:1,4) = [character(len=AERO_NAME_LEN) :: "ASQT"]
-  ! oligomers of the isoprene and sesquiterpene SOA
-  group_spec(1:1,5) = [character(len=AERO_NAME_LEN) :: "AOLGB"]
-  ! SOA from the uptake of glyoxal and methylglyoxal
-  group_spec(1:1,6) = [character(len=AERO_NAME_LEN) :: "AGLY"]
-  ! potential SOA from combustion emissions, fresh and aged by OH
-  group_spec(1:2,7) = [character(len=AERO_NAME_LEN) :: "APCSO", "APCSO2"]
-  ! primary organic matter
-  group_spec(1:6,8) = [character(len=AERO_NAME_LEN) :: &
-       "ALVPO1", "ASVPO1", "ASVPO2", "ASVPO3", "AIVPO1", "OC"]
-  ! oxidation products of the primary organic vapors
-  group_spec(1:5,9) = [character(len=AERO_NAME_LEN) :: &
-       "ALVOO1", "ALVOO2", "ASVOO1", "ASVOO2", "ASVOO3"]
+  ! primary organic matter: the alkane-like reactive organic carbon
+  ! (APOM of CMAQ) and the nonvolatile OC of the initial and background
+  ! particles
+  group_spec(1:7,1) = [character(len=AERO_NAME_LEN) :: &
+       "AROCN2ALK", "AROCN1ALK", "AROCP0ALK", "AROCP1ALK", "AROCP2ALK", &
+       "AROCP3ALK", "OC"]
+  ! oxygenated reactive organic carbon, aromatic peroxides and the SOA of
+  ! phenols and other species (AORGA of CMAQ): SOA of aromatics, alkanes,
+  ! sesquiterpenes and organic gases of intermediate volatility; the
+  ! oxygenated primary organic matter of cooking is emitted as these
+  ! species and counts as secondary here, as in CMAQ
+  group_spec(1:14,2) = [character(len=AERO_NAME_LEN) :: &
+       "AROCN2OXY2", "AROCN2OXY4", "AROCN2OXY8", "AROCN1OXY1", &
+       "AROCN1OXY3", "AROCN1OXY6", "AROCP0OXY2", "AROCP0OXY4", &
+       "AROCP1OXY1", "AROCP1OXY3", "AROCP2OXY2", "AROCP3OXY2", "AOP3", &
+       "ASOAT"]
+  ! SOA from monoterpenes: highly oxygenated molecules, organic nitrates
+  ! and the photolysis product of the HOM (part of AORGB of CMAQ)
+  group_spec(1:5,3) = [character(len=AERO_NAME_LEN) :: &
+       "AHOM", "AELHOM", "ATRPN", "AHONIT", "AMTN1"]
+  ! SOA from isoprene: uptake of the epoxydiols, of the tetrafunctional
+  ! compounds and of the nitrates (part of AORGB of CMAQ)
+  group_spec(1:4,4) = [character(len=AERO_NAME_LEN) :: &
+       "AISO3NOS", "AISO3OS", "AISO4", "AISO5"]
+  ! SOA from the uptake of methylglyoxal
+  group_spec(1:1,5) = [character(len=AERO_NAME_LEN) :: "AGLYOLIG"]
+  ! SOA from cloud processing (not formed in PartMC-MOSAIC)
+  group_spec(1:1,6) = [character(len=AERO_NAME_LEN) :: "AORGC"]
 
   o_cs = [ real(kind=dp) :: ] ! silence compiler warnings
   sec_fracs = [ real(kind=dp) :: ]

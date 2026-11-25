@@ -7,15 +7,12 @@ import netCDF4, numpy
 
 # (variable name in the process file, legend label)
 groups = [
-    ("poa", "POA"),
-    ("oxidized_poa", "oxidized POA"),
-    ("soa_combustion", "combustion SOA"),
-    ("soa_anthro", "anthropogenic SOA"),
+    ("poa", "POA (alkane-like ROC, OC)"),
+    ("soa_roc", "oxygenated ROC SOA"),
     ("soa_monoterpene", "monoterpene SOA"),
     ("soa_isoprene", "isoprene SOA"),
-    ("soa_sesquiterpene", "sesquiterpene SOA"),
-    ("soa_bio_oligomer", "biogenic oligomers"),
-    ("soa_glyoxal", "glyoxal SOA"),
+    ("soa_glyoxal", "methylglyoxal SOA"),
+    ("soa_cloud", "cloud SOA"),
 ]
 
 (figure, axes) = mpl_helper.make_fig(figure_width=7, right_margin=2.6)
