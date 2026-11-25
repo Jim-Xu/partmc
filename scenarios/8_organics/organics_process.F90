@@ -66,8 +66,8 @@ program process
   ! definition file of CMAQ (SpecDef_Conc_cracmm3.txt)
   group_spec = ""
   ! primary organic matter: the alkane-like reactive organic carbon
-  ! (APOM of CMAQ) and the nonvolatile OC of the initial and background
-  ! particles
+  ! (APOM of CMAQ) and the nonvolatile OC (which the present case of the
+  ! scenario does not use)
   group_spec(1:7,1) = [character(len=AERO_NAME_LEN) :: &
        "AROCN2ALK", "AROCN1ALK", "AROCP0ALK", "AROCP1ALK", "AROCP2ALK", &
        "AROCP3ALK", "OC"]
@@ -91,7 +91,9 @@ program process
        "AISO3NOS", "AISO3OS", "AISO4", "AISO5"]
   ! SOA from the uptake of methylglyoxal
   group_spec(1:1,5) = [character(len=AERO_NAME_LEN) :: "AGLYOLIG"]
-  ! SOA from cloud processing (not formed in PartMC-MOSAIC)
+  ! SOA from cloud processing, which PartMC-MOSAIC does not form; in the
+  ! present case of the scenario it is the aged regional organic matter
+  ! of the initial and background particles
   group_spec(1:1,6) = [character(len=AERO_NAME_LEN) :: "AORGC"]
 
   o_cs = [ real(kind=dp) :: ] ! silence compiler warnings

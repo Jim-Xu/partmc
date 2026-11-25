@@ -12,7 +12,7 @@ groups = [
     ("soa_monoterpene", "monoterpene SOA"),
     ("soa_isoprene", "isoprene SOA"),
     ("soa_glyoxal", "methylglyoxal SOA"),
-    ("soa_cloud", "cloud SOA"),
+    ("soa_cloud", "AORGC (cloud SOA; here regional OA)"),
 ]
 
 (figure, axes) = mpl_helper.make_fig(figure_width=7, right_margin=2.6)
