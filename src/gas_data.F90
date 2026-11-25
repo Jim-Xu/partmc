@@ -32,7 +32,7 @@ module pmc_gas_data
   !! marine mechanisms of CBM-Z. The list is generated from the
   !! mechanism file of CMAQ together with the tables of MOSAIC and is
   !! checked against them in mosaic_init().
-  integer, parameter :: GAS_MOSAIC_N_SPEC = 161
+  integer, parameter :: GAS_MOSAIC_N_SPEC = 166
   character(len=GAS_NAME_LEN), parameter :: &
        GAS_MOSAIC_SPEC_NAME(GAS_MOSAIC_N_SPEC) &
        = [character(len=GAS_NAME_LEN) :: &
@@ -54,29 +54,30 @@ module pmc_gas_data
        "BALD",         "BENZ",         "OPB",          "BENP", &
        "PHEN",         "SOATOL",       "TOLP",         "CSL", &
        "SOAXYL",       "XYLP",         "EBZ",          "EBZP", &
+       "ISON",         "ISONP",        "IPX",          "INALD", &
        "APIP1",        "APIP2",        "LIMP1",        "LIMP2", &
-       "BALP",         "CHO",          "HC10P",        "APINP1", &
-       "APINP2",       "LIMNP1",       "LIMNP2",       "VROCP4OXY2", &
-       "FURANONE",     "VROCIOXY",     "SLOWROC",      "FURAN", &
-       "FURANO2",      "SESQ",         "SESQNRO2",     "SESQRO2", &
-       "VROCP6ALK",    "VROCP6ALKP",   "VROCP5ALK",    "VROCP5ALKP", &
-       "VROCP4ALK",    "VROCP4ALKP",   "VROCP3ALKP",   "VROCP2ALKP", &
-       "VROCP1ALKP",   "HC10",         "VROCP6ALKP2",  "VROCP5ALKP2", &
-       "VROCP4ALKP2",  "VROCP3ALKP2",  "VROCP2ALKP2",  "VROCP1ALKP2", &
-       "HC10P2",       "VROCP6ARO",    "VROCP6AROP",   "VROCP5ARO", &
-       "VROCP5AROP",   "NAPH",         "NAPHP",        "VROCP5OXY1", &
-       "VROCP6OXY1",   "STY",          "STYP",         "PAR", &
-       "AONE",         "MGLY",         "ETH",          "OLET", &
-       "OLEI",         "TOL",          "XYL",          "CRES", &
-       "TO2",          "CRO",          "OPEN",         "ONIT", &
-       "ROOH",         "RO2",          "ANO2",         "NAP", &
-       "XO2",          "XPAR",         "ISOP",         "ISOPRD", &
-       "ISOPP",        "ISOPN",        "ISOPO2",       "API", &
-       "LIM",          "ISPX",         "EPOX",         "BPIN", &
-       "XO2N",         "HPLD",         "DMS",          "MSA", &
-       "DMSO",         "DMSO2",        "CH3SO2H",      "CH3SCH2OO", &
-       "CH3SO2",       "CH3SO3",       "CH3SO2OO",     "CH3SO2CH2OO", &
-       "SULFHOX"]
+       "BALP",         "CHO",          "PROD_ASOAT",   "HC10P", &
+       "APINP1",       "APINP2",       "LIMNP1",       "LIMNP2", &
+       "VROCP4OXY2",   "FURANONE",     "VROCIOXY",     "SLOWROC", &
+       "FURAN",        "FURANO2",      "SESQ",         "SESQNRO2", &
+       "SESQRO2",      "VROCP6ALK",    "VROCP6ALKP",   "VROCP5ALK", &
+       "VROCP5ALKP",   "VROCP4ALK",    "VROCP4ALKP",   "VROCP3ALKP", &
+       "VROCP2ALKP",   "VROCP1ALKP",   "HC10",         "VROCP6ALKP2", &
+       "VROCP5ALKP2",  "VROCP4ALKP2",  "VROCP3ALKP2",  "VROCP2ALKP2", &
+       "VROCP1ALKP2",  "HC10P2",       "VROCP6ARO",    "VROCP6AROP", &
+       "VROCP5ARO",    "VROCP5AROP",   "NAPH",         "NAPHP", &
+       "VROCP5OXY1",   "VROCP6OXY1",   "STY",          "STYP", &
+       "PAR",          "AONE",         "MGLY",         "ETH", &
+       "OLET",         "OLEI",         "TOL",          "XYL", &
+       "CRES",         "TO2",          "CRO",          "OPEN", &
+       "ONIT",         "ROOH",         "RO2",          "ANO2", &
+       "NAP",          "XO2",          "XPAR",         "ISOP", &
+       "ISOPRD",       "ISOPP",        "ISOPN",        "ISOPO2", &
+       "API",          "LIM",          "ISPX",         "EPOX", &
+       "BPIN",         "XO2N",         "HPLD",         "DMS", &
+       "MSA",          "DMSO",         "DMSO2",        "CH3SO2H", &
+       "CH3SCH2OO",    "CH3SO2",       "CH3SO3",       "CH3SO2OO", &
+       "CH3SO2CH2OO",  "SULFHOX"]
 
   !> Constant gas data.
   !!
