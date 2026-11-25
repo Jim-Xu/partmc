@@ -15,18 +15,20 @@
 #   - the background air, with which the box exchanges at a constant
 #     rate: the regional air;
 #   - the biogenic emissions of the land beneath (MEGAN2.1). Nothing
-#     else is emitted.
+#     else is emitted;
+#   - the dry deposition of particles and gases to that land.
 # All parameters are below (see 0_README.md for where they come from);
 # the variants in CASES change some of them. Other cases are set up by
 # adding a variant or by changing the parameters.
 #
 # Writes organics.spec, temp.dat, pres.dat, height.dat, gas_init.dat,
 # gas_back.dat, gas_emit.dat, aero_init_dist.dat, aero_back.dat,
-# aero_back_dist.dat, aero_emit.dat, aero_emit_dist.dat and the
-# compositions aero_comp_*.dat. The species files gas_data.dat and
+# aero_back_dist.dat, aero_emit.dat, aero_emit_dist.dat, the
+# compositions aero_comp_*.dat and, with deposition, drydep_params.dat
+# and gas_deposition.dat. The species files gas_data.dat and
 # aero_data.dat are not changed.
 
-import math, sys
+import math, os, sys
 
 ######################################################################
 # the case
@@ -60,6 +62,11 @@ CASE = {
     # canopy to that at the top of the atmosphere), the value of the
     # standard conditions of MEGAN (Guenther et al., 2006)
     "ppfd_transmission": 0.6,
+    # dry deposition of particles and gases to the forest (see below)
+    "deposition": True,
+    # wind speed at 20 m for the particle dry deposition: with the
+    # roughness length of the forest a friction velocity of 0.28 m/s
+    "wind_speed": 2.0,                 # m/s
     # particle-resolved run
     "n_part": 1000,
     "n_repeat": 3,
@@ -69,7 +76,8 @@ CASE = {
 CASES = {
     "urban_forest": {},                    # the default
     "forest": {"delta_co": 0.0},           # without the city
-    "urban": {"land_cover": {}},           # without the forest
+    "urban": {"land_cover": {}},           # without the biogenic emissions
+    "urban_forest_nodep": {"deposition": False},   # without deposition
 }
 
 ######################################################################
@@ -240,6 +248,47 @@ MOLEC_WEIGHT_BIO = {"ISOP": 68.12, "API": 136.23, "BPIN": 136.23,
 EMIT_STEP = 1800.0               # s, time step of the emission file
 
 ######################################################################
+# dry deposition
+
+# particles: the loss function "drydep" of PartMC, the size-resolved
+# scheme of Zhang et al. (2001) with its own coefficients and the
+# parameters of its land use category 5 (mixed broadleaf and needleleaf
+# trees) in the seasonal category 1 (midsummer with lush vegetation),
+# Table 3; neutral stability, reference height 20 m. In the order of the
+# drydep_params file ("u_mean" is the wind speed of the case).
+DRYDEP_PARAMS = [("z_ref", 20.0), ("u_mean", None), ("z_rough", 1.15),
+                 ("A", 5.0e-3), ("alpha", 0.8), ("eps_0", 3.0),
+                 ("gamma", 0.56), ("C_B", 1.0), ("C_IN", 0.5), ("C_IM", 1.0),
+                 ("nu", 2.0), ("beta", 2.0)]
+# gases: daytime (10:00 to 15:00) dry deposition velocities (cm/s)
+# measured above a forest in the southeastern United States by Nguyen et
+# al. (2015), for the species of CBM-Z and of the organic aerosol block
+# that correspond to the measured compounds: nitric acid, hydrogen
+# peroxide, the isoprene hydroxy hydroperoxides and epoxydiols (ISPX,
+# ISHP, IEPOX; IPX, the dihydroxy dihydroperoxides, like them), the other
+# hydroperoxides (ROOH, HPLD), formic acid (also RCOOH), the isoprene
+# hydroxy nitrates (ONIT, ISON, INALD) and the monoterpene nitrates
+# (VTRPN, VHONIT)
+GAS_VD_DAY = {"HNO3": 3.8, "H2O2": 5.2, "ISPX": 2.5, "ISHP": 2.5,
+              "IEPOX": 2.5, "IPX": 2.5, "ROOH": 2.5, "HPLD": 2.5,
+              "HCOOH": 1.0, "RCOOH": 1.0, "ONIT": 1.5, "ISON": 1.5,
+              "INALD": 1.5, "VTRPN": 0.8, "VHONIT": 0.8}
+# the oxygenated vapors of the organic aerosol deposit like the
+# hydroperoxides and epoxydiols: their effective Henry constants are
+# large (Hodzic et al., 2014; Knote et al., 2015). CMAQ deposits these
+# vapors too, but not VHOM and VELHOM (GC_cracmm3 namelist of CMAQ 6.0);
+# the alkane-like vapors are hardly soluble and are not deposited here
+VAPOR_VD_DAY = 2.5
+DEPOSITED_VAPORS = ["VOP3", "VROCN2OXY2", "VROCN2OXY4", "VROCN2OXY8",
+                    "VROCN1OXY1", "VROCN1OXY3", "VROCN1OXY6", "VROCP0OXY2",
+                    "VROCP0OXY4", "VROCP1OXY1", "VROCP1OXY3", "VROCP2OXY2",
+                    "VROCP3OXY2", "VMTN1"]
+# diurnal cycle of the gas deposition velocities: the sine of the solar
+# elevation relative to its mean from 10:00 to 15:00 local time, at
+# least this fraction (at night)
+GAS_VD_NIGHT_FRACTION = 0.1
+
+######################################################################
 
 R_GAS = 8.314462618              # J mol^{-1} K^{-1}
 
@@ -371,6 +420,21 @@ def biogenic_emissions(case):
             values[i] += ef * gamma * 1e-6 / MOLEC_WEIGHT_BIO[spec] / 3600.0
     return times, emit
 
+def gas_deposition_profile(case):
+    """Times (s), rate scalings (the diurnal cycle) and {species:
+    daytime velocity (m/s)} of the gas dry deposition."""
+    times = [EMIT_STEP * i for i in range(int(case["hours"] * 3600
+                                              / EMIT_STEP))]
+    t10 = (10.0 - case["start_local_hour"]) * 3600.0
+    ref = [max(sin_solar_elevation(case, t10 + 60.0 * (i + 0.5)), 0.0)
+           for i in range(5 * 60)]
+    s_ref = sum(ref) / len(ref)
+    rates = [max(max(sin_solar_elevation(case, t + 0.5 * EMIT_STEP), 0.0)
+                 / s_ref, GAS_VD_NIGHT_FRACTION) for t in times]
+    vd = dict((k, 1e-2 * v) for (k, v) in GAS_VD_DAY.items())
+    vd.update((k, 1e-2 * VAPOR_VD_DAY) for k in DEPOSITED_VAPORS)
+    return times, rates, vd
+
 def mode_text(name, comp_file, num_conc, diam, log10_std):
     return ("mode_name %s\nmass_frac %s\ndiam_type geometric\n"
             "mode_type log_normal\nnum_conc %.6e\ngeom_mean_diam %g\n"
@@ -426,8 +490,7 @@ gas_emissions gas_emit.dat      # gas emissions file
 gas_background gas_back.dat     # background gas concentrations file
 aero_emissions aero_emit.dat    # aerosol emissions file
 aero_background aero_back.dat   # aerosol background file
-loss_function none              # loss function specification
-
+%(loss_lines)s
 rel_humidity %(rel_humidity)g               # initial relative humidity (1)
 latitude %(latitude)g                     # latitude (degrees, -90 to 90)
 longitude %(longitude)g                   # longitude (degrees, -180 to 180)
@@ -578,8 +641,44 @@ def main(name):
         write("gas_emit.dat", "# generated by make_case.py: no gas "
               "emissions\ntime 0\nrate 0\nNO 0.0\n")
 
+    # dry deposition
+    if case["deposition"]:
+        params = [(k, case["wind_speed"] if k == "u_mean" else v)
+                  for (k, v) in DRYDEP_PARAMS]
+        write("drydep_params.dat", "# generated by make_case.py: particle "
+              "dry deposition, Zhang et al. (2001), land use category 5, "
+              "seasonal category 1\n"
+              + "".join("%-8s %g\n" % kv for kv in params))
+        times_d, rates_d, vd = gas_deposition_profile(case)
+        for k in vd:
+            assert k in gas_species, "unknown gas species %s" % k
+        write("gas_deposition.dat", "# generated by make_case.py: gas dry "
+              "deposition\n# time (s)\n# rate = diurnal scaling\n"
+              "# dry deposition velocities (m/s)\n"
+              + "%-11s" % "time" + "".join("%10d" % t for t in times_d) + "\n"
+              + "%-11s" % "rate" + "".join("%10.4f" % r for r in rates_d)
+              + "\n" + "".join("%-11s" % k + "%10.3E" % vd[k] * len(times_d)
+                               + "\n" for k in gas_species if k in vd))
+        loss_lines = ("loss_function drydep            # loss function "
+                      "specification\ndrydep_params drydep_params.dat "
+                      "# particle dry deposition parameters\ngas_deposition "
+                      "gas_deposition.dat # gas dry deposition velocities\n")
+        params = dict(params)
+        print("dry deposition: friction velocity %.2f m/s; gas velocities "
+              "x %.2f at noon, x %.2f at night (daily mean %.2f)"
+              % (0.4 * params["u_mean"] / math.log(params["z_ref"]
+                                                   / params["z_rough"]),
+                 max(rates_d), min(rates_d), sum(rates_d[:48]) / 48.0))
+    else:
+        for f in ("drydep_params.dat", "gas_deposition.dat"):
+            if os.path.exists(f):
+                os.remove(f)
+        loss_lines = ("loss_function none              # loss function "
+                      "specification\n")
+
     write("organics.spec", SPEC % dict(case, t_max=t_max,
-                                       start_time=start_time))
+                                       start_time=start_time,
+                                       loss_lines=loss_lines))
     print("initial gases (ppb): " + ", ".join(
         "%s %.3g" % (k, gas[k]) for k in ["CO", "NO", "NO2", "O3", "SO2",
                                           "NH3", "TOL", "XYL", "PAR", "HC10",

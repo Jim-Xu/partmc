@@ -27,7 +27,9 @@ gas_emissions gas_emit.dat      # gas emissions file
 gas_background gas_back.dat     # background gas concentrations file
 aero_emissions aero_emit.dat    # aerosol emissions file
 aero_background aero_back.dat   # aerosol background file
-loss_function none              # loss function specification
+loss_function drydep            # loss function specification
+drydep_params drydep_params.dat # particle dry deposition parameters
+gas_deposition gas_deposition.dat # gas dry deposition velocities
 
 rel_humidity 0.9               # initial relative humidity (1)
 latitude 33                     # latitude (degrees, -90 to 90)
