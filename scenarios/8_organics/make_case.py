@@ -262,15 +262,19 @@ DRYDEP_PARAMS = [("z_ref", 20.0), ("u_mean", None), ("z_rough", 1.15),
                  ("nu", 2.0), ("beta", 2.0)]
 # gases: daytime (10:00 to 15:00) dry deposition velocities (cm/s)
 # measured above a forest in the southeastern United States by Nguyen et
-# al. (2015), for the species of CBM-Z and of the organic aerosol block
-# that correspond to the measured compounds: nitric acid, hydrogen
-# peroxide, the isoprene hydroxy hydroperoxides and epoxydiols (ISPX,
-# ISHP, IEPOX; IPX, the dihydroxy dihydroperoxides, like them), the other
-# hydroperoxides (ROOH, HPLD), formic acid (also RCOOH), the isoprene
-# hydroxy nitrates (ONIT, ISON, INALD) and the monoterpene nitrates
-# (VTRPN, VHONIT)
+# al. (2015, Fig. 3), for the species of CBM-Z and of the organic aerosol
+# block that correspond to the measured compounds: nitric acid 3.8,
+# hydrogen peroxide 5.2, the isoprene hydroxy hydroperoxides and
+# epoxydiols 2.5 (ISPX, ISHP, IEPOX), the hydroperoxy aldehydes 2.4
+# (HPLD), formic acid 1.0, the hydroxy nitrates of isoprene 1.5 (ISON)
+# and of methacrolein and methyl vinyl ketone 1.5 (ONIT). By analogy:
+# IPX (dihydroxy dihydroperoxides) and ROOH (the other hydroperoxides;
+# measured 0.8 to 4.1) like the hydroxy hydroperoxides, RCOOH like
+# formic acid, INALD (nitrooxy aldehydes) like the hydroxy nitrates, the
+# monoterpene nitrates VTRPN and VHONIT like the measured monoterpene
+# nitrooxy hydroperoxides 0.8
 GAS_VD_DAY = {"HNO3": 3.8, "H2O2": 5.2, "ISPX": 2.5, "ISHP": 2.5,
-              "IEPOX": 2.5, "IPX": 2.5, "ROOH": 2.5, "HPLD": 2.5,
+              "IEPOX": 2.5, "IPX": 2.5, "ROOH": 2.5, "HPLD": 2.4,
               "HCOOH": 1.0, "RCOOH": 1.0, "ONIT": 1.5, "ISON": 1.5,
               "INALD": 1.5, "VTRPN": 0.8, "VHONIT": 0.8}
 # the oxygenated vapors of the organic aerosol deposit like the
@@ -285,7 +289,9 @@ DEPOSITED_VAPORS = ["VOP3", "VROCN2OXY2", "VROCN2OXY4", "VROCN2OXY8",
                     "VROCP3OXY2", "VMTN1"]
 # diurnal cycle of the gas deposition velocities: the sine of the solar
 # elevation relative to its mean from 10:00 to 15:00 local time, at
-# least this fraction (at night)
+# least this fraction (at night). The measured velocities are close to
+# zero at night (Nguyen et al., 2015, Fig. 3), within their error bars
+# below a tenth of the daytime mean
 GAS_VD_NIGHT_FRACTION = 0.1
 
 ######################################################################
