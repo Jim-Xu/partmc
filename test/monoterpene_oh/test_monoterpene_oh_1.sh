@@ -12,9 +12,9 @@ mkdir -p out
 ../../partmc run_part.spec
 ../../extract_gas out/monoterpene_oh_0001
 
-# API (column 150) against the solution with OH in steady state: the OH from
+# API (column 152) against the solution with OH in steady state: the OH from
 # the photolysis of H2O2 is consumed by API. The tolerance is 1% of the API
 # that reacts (11.6 of 1000 ppb)
-../../numeric_diff --by col --min-col 150 --max-col 150 --rel-tol 1e-4 ref_monoterpene_oh_gas.txt out/monoterpene_oh_0001_gas.txt
+../../numeric_diff --by col --min-col 152 --max-col 152 --rel-tol 1e-4 ref_monoterpene_oh_gas.txt out/monoterpene_oh_0001_gas.txt
 # H2O2 (column 17); the reference leaves out the H2O2 formed from HO2
 ../../numeric_diff --by col --min-col 17 --max-col 17 --rel-tol 1e-3 ref_monoterpene_oh_gas.txt out/monoterpene_oh_0001_gas.txt
