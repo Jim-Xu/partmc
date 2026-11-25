@@ -66,8 +66,10 @@ PartMC must be built with the MOSAIC library that has the CRACMM3 organic aeroso
 * `mass_conc_<group>`: mass concentration of the species groups of CMAQ's species definitions for CRACMM3 (`SpecDef_Conc_cracmm3.txt`): `poa` (the alkane-like reactive organic carbon, APOM of CMAQ, and `OC`), `soa_roc` (the oxygenated reactive organic carbon, `AOP3` and `ASOAT`, AORGA of CMAQ: SOA from aromatics, alkanes, IVOCs and sesquiterpenes, but also the oxygenated POA of cooking, which is emitted as these species), `soa_monoterpene`, `soa_isoprene` (together AORGB of CMAQ), `soa_glyoxal` and `soa_cloud`,
 * `tot_org_mass_conc`, `tot_sec_org_mass_conc`: all organic matter and secondary organic matter (everything except the group `poa`, as ASOM of CMAQ),
 * `tot_o_c`, `tot_om_oc`: carbon-weighted O:C and OM:OC of all organic matter; `sec_o_c`: O:C of the secondary organic matter,
+* `rel_humid`, `mixed_num_frac`, `llps_num_frac`, `llps_org_mass_frac`: the relative humidity; the number fraction of the particles that contain both organic matter and inorganic salt (SO4, NO3, NH4, Cl, Na); the number fraction of the particles that are separated into an organic-rich and an inorganic-rich phase, and the fraction of all organic matter that is in them. A particle with organic matter and salt separates when the relative humidity is below its separation relative humidity, SRH = 1 / (1 + exp(7.7 OM/OC - 15.8)) with the OM/OC of its organic matter: the relation with which CMAQ diagnoses the phase separation (Pye et al., 2017, Eq. 7), derived from the experiments with ammonium sulfate of You et al. (2013),
+* `ccn_conc_s010`, `ccn_conc_s020`, `ccn_conc_s030`, `ccn_conc_s050`, `ccn_conc_s100`: number concentrations of the particles that activate at supersaturations of 0.1, 0.2, 0.3, 0.5 and 1%, from the critical supersaturation of each particle by kappa-Koehler theory (Petters and Kreidenweis, 2007) with the volume average of the kappa of its dry species and the surface tension of water; `ccn_est_conc_s010` and so on: the same with the effective surface tension of an organic film (`aero_particle_crit_rel_humid_est`; particles without soluble material, for which it is not defined, keep the value with the surface tension of water),
 
-and one file per output time with the two-dimensional number distributions of dry diameter against the per-particle O:C (`diam_o_c_dist`) and against the secondary organic fraction of the dry mass (`diam_sec_frac_dist`).
+and one file per output time with the two-dimensional number distributions of dry diameter against the per-particle O:C (`diam_o_c_dist`), the secondary organic fraction of the dry mass (`diam_sec_frac_dist`), the separation relative humidity of the particles with organic matter and salt (`diam_srh_dist`), the critical supersaturation with the surface tension of water and with the effective surface tension (`diam_sc_dist`, `diam_sc_est_dist`) and kappa (`diam_kappa_dist`).
 
 ## References
 
@@ -85,6 +87,8 @@ Q. Lu et al. (2020) Simulation of organic aerosol formation during the CalNex st
 
 T. B. Nguyen, J. D. Crounse, A. P. Teng, J. M. St. Clair, F. Paulot, G. M. Wolfe, and P. O. Wennberg (2015) Rapid deposition of oxidized biogenic compounds to a temperate forest, _Proc. Natl. Acad. Sci. USA_ 112, E392-E401, DOI: <http://dx.doi.org/10.1073/pnas.1418702112>.
 
+M. D. Petters and S. M. Kreidenweis (2007) A single parameter representation of hygroscopic growth and cloud condensation nucleus activity, _Atmos. Chem. Phys._ 7, 1961-1971, DOI: <http://dx.doi.org/10.5194/acp-7-1961-2007>.
+
 G. Pouliot and H. O. T. Pye, CMAQv5.1 VOC emission updates, CMAQ wiki, <https://cmascenter.org/cmaq/wiki/airqualitymodeling.org/index.php/CMAQv5.1_VOC_Emission_Updates>.
 
 H. O. T. Pye et al. (2017) On the implications of aerosol liquid water and phase separation for organic aerosol mass, _Atmos. Chem. Phys._ 17, 343-369, DOI: <http://dx.doi.org/10.5194/acp-17-343-2017>.
@@ -96,5 +100,7 @@ N. Riemer, M. West, R. A. Zaveri, and R. C. Easter (2009) Simulating the evoluti
 T. N. Skipper et al. (2024) Role of chemical production and depositional losses on formaldehyde in the Community Regional Atmospheric Chemistry Multiphase Mechanism (CRACMM), _Atmos. Chem. Phys._ 24, 12903-12924, DOI: <http://dx.doi.org/10.5194/acp-24-12903-2024>.
 
 M. C. Woody et al. (2016) Understanding sources of organic aerosol during CalNex-2010 using the CMAQ-VBS, _Atmos. Chem. Phys._ 16, 4081-4100, DOI: <http://dx.doi.org/10.5194/acp-16-4081-2016>.
+
+Y. You, L. Renbaum-Wolff, and A. K. Bertram (2013) Liquid-liquid phase separation in particles containing organics mixed with ammonium sulfate, ammonium bisulfate, ammonium nitrate or sodium chloride, _Atmos. Chem. Phys._ 13, 11723-11734, DOI: <http://dx.doi.org/10.5194/acp-13-11723-2013>.
 
 L. Zhang, S. Gong, J. Padro, and L. Barrie (2001) A size-segregated particle dry deposition scheme for an atmospheric aerosol module, _Atmos. Environ._ 35, 549-560, DOI: <http://dx.doi.org/10.1016/S1352-2310(00)00326-5>.

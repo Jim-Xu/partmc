@@ -8,7 +8,13 @@
 !> Read NetCDF output files and compute the organic aerosol diagnostics:
 !> bulk mass concentrations of groups of organic species, bulk O:C and
 !> OM:OC, and per-particle distributions of O:C and of the secondary
-!> organic mass fraction.
+!> organic mass fraction; the liquid-liquid phase separation of the
+!> particles that contain organic matter and inorganic salt, from the
+!> separation relative humidity of their OM:OC; and the critical
+!> supersaturation of every particle (kappa-Koehler theory with the
+!> surface tension of water and with the effective surface tension of
+!> the organic film) with the CCN concentrations at fixed
+!> supersaturations.
 program process
 
   use pmc_output
@@ -28,9 +34,22 @@ program process
   !> Whether the groups are secondary organic matter.
   logical, parameter :: GROUP_SECONDARY(N_GROUP) = [.false., .true., &
        .true., .true., .true., .true.]
+  !> Number of supersaturations of the CCN concentrations.
+  integer, parameter :: N_SS = 5
+  !> Supersaturations of the CCN concentrations (%).
+  real(kind=dp), parameter :: CCN_SS(N_SS) = [0.1d0, 0.2d0, 0.3d0, &
+       0.5d0, 1d0]
+  !> Names of the supersaturations in the output variables.
+  character(len=4), parameter :: CCN_SS_NAME(N_SS) = [ &
+       character(len=4) :: "s010", "s020", "s030", "s050", "s100"]
+  !> Inorganic species that form the salt for the phase separation
+  !> (those missing from the aerosol data are skipped).
+  character(len=AERO_NAME_LEN), parameter :: SALT_SPEC(5) = [ &
+       character(len=AERO_NAME_LEN) :: "SO4", "NO3", "NH4", "Cl", "Na"]
 
   character(len=PMC_MAX_FILENAME_LEN) :: in_filename, out_filename
-  type(bin_grid_t) :: diam_grid, o_c_grid, frac_grid
+  type(bin_grid_t) :: diam_grid, o_c_grid, frac_grid, sc_grid, kappa_grid, &
+       srh_grid
   type(aero_data_t) :: aero_data
   type(aero_state_t) :: aero_state
   type(env_state_t) :: env_state
@@ -45,12 +64,22 @@ program process
   real(kind=dp), allocatable :: times(:), dry_diameters(:), num_concs(:), &
        dry_masses(:), sec_masses(:), sec_fracs(:), org_carbon_masses(:), &
        o_cs(:), spec_mass_concs(:), group_mass_concs(:), num_dist(:), &
-       diam_o_c_dist(:,:), diam_sec_frac_dist(:,:)
+       diam_o_c_dist(:,:), diam_sec_frac_dist(:,:), org_masses(:), &
+       salt_masses(:), srhs(:), scs(:), scs_est(:), kappas(:), &
+       diam_srh_dist(:,:), diam_sc_dist(:,:), diam_sc_est_dist(:,:), &
+       diam_kappa_dist(:,:)
+  logical, allocatable :: is_mixed(:), is_separated(:)
+  real(kind=dp) :: tot_org_part_mass_conc
+  integer :: i_salt, i_ss
   type(stats_1d_t) :: stats_num_dist, stats_tot_num_conc, &
        stats_tot_dry_mass_conc, stats_tot_org_mass_conc, &
        stats_tot_sec_org_mass_conc, stats_tot_o_c, stats_tot_om_oc, &
-       stats_sec_o_c, stats_group_mass_conc(N_GROUP)
-  type(stats_2d_t) :: stats_diam_o_c_dist, stats_diam_sec_frac_dist
+       stats_sec_o_c, stats_group_mass_conc(N_GROUP), stats_rel_humid, &
+       stats_mixed_num_frac, stats_llps_num_frac, stats_llps_org_frac, &
+       stats_ccn_conc(N_SS), stats_ccn_est_conc(N_SS)
+  type(stats_2d_t) :: stats_diam_o_c_dist, stats_diam_sec_frac_dist, &
+       stats_diam_srh_dist, stats_diam_sc_dist, stats_diam_sc_est_dist, &
+       stats_diam_kappa_dist
 
   call pmc_mpi_init()
 
@@ -59,6 +88,9 @@ program process
   call bin_grid_make(diam_grid, BIN_GRID_TYPE_LOG, 180, 1d-9, 1d-3)
   call bin_grid_make(o_c_grid, BIN_GRID_TYPE_LINEAR, 70, 0d0, 1.4d0)
   call bin_grid_make(frac_grid, BIN_GRID_TYPE_LINEAR, 50, 0d0, 1d0)
+  call bin_grid_make(sc_grid, BIN_GRID_TYPE_LOG, 50, 1d-4, 1d0)
+  call bin_grid_make(kappa_grid, BIN_GRID_TYPE_LINEAR, 80, 0d0, 0.8d0)
+  call bin_grid_make(srh_grid, BIN_GRID_TYPE_LINEAR, 50, 0d0, 1d0)
 
   allocate(times(n_index))
 
@@ -211,6 +243,103 @@ program process
              dry_diameters, frac_grid, sec_fracs, num_concs)
         call stats_2d_add(stats_diam_sec_frac_dist, diam_sec_frac_dist)
 
+        ! liquid-liquid phase separation, diagnosed as in CMAQ (Pye et al.,
+        ! 2017, Eq. 7): the separation relative humidity of a particle
+        ! follows from the OM/OC of its organic matter,
+        ! SRH = 1 / (1 + exp(7.7 OM/OC - 15.8)), the relation that Pye et
+        ! al. derived from the experiments with ammonium sulfate of You et
+        ! al. (2013); a particle that contains organic matter and inorganic
+        ! salt separates into an organic-rich and an inorganic-rich phase
+        ! when the relative humidity is below its SRH
+        org_masses = aero_state_organic_masses(aero_state, aero_data)
+        if (allocated(salt_masses)) deallocate(salt_masses)
+        if (allocated(srhs)) deallocate(srhs)
+        if (allocated(kappas)) deallocate(kappas)
+        if (allocated(is_mixed)) deallocate(is_mixed)
+        if (allocated(is_separated)) deallocate(is_separated)
+        allocate(salt_masses(aero_state_n_part(aero_state)), &
+             srhs(aero_state_n_part(aero_state)), &
+             kappas(aero_state_n_part(aero_state)), &
+             is_mixed(aero_state_n_part(aero_state)), &
+             is_separated(aero_state_n_part(aero_state)))
+        salt_masses = 0d0
+        do i_salt = 1,size(SALT_SPEC)
+           i_spec = aero_data_spec_by_name(aero_data, SALT_SPEC(i_salt))
+           if (i_spec == 0) cycle
+           salt_masses = salt_masses + aero_particle_species_mass( &
+                aero_state%apa%particle(1:aero_state_n_part(aero_state)), &
+                i_spec, aero_data)
+        end do
+        do i_part = 1,aero_state_n_part(aero_state)
+           is_mixed(i_part) = (org_carbon_masses(i_part) > 0d0) &
+                .and. (salt_masses(i_part) > 0d0)
+           if (is_mixed(i_part)) then
+              srhs(i_part) = 1d0 / (1d0 + exp(7.7d0 * org_masses(i_part) &
+                   / org_carbon_masses(i_part) - 15.8d0))
+           else
+              srhs(i_part) = 0d0
+           end if
+           is_separated(i_part) = is_mixed(i_part) &
+                .and. (env_state%rel_humid < srhs(i_part))
+        end do
+        call stats_1d_add_entry(stats_rel_humid, env_state%rel_humid, &
+             i_index)
+        if (tot_num_conc > 0d0) then
+           call stats_1d_add_entry(stats_mixed_num_frac, &
+                sum(num_concs, mask=is_mixed) / tot_num_conc, i_index)
+           call stats_1d_add_entry(stats_llps_num_frac, &
+                sum(num_concs, mask=is_separated) / tot_num_conc, i_index)
+        else
+           call stats_1d_add_entry(stats_mixed_num_frac, 0d0, i_index)
+           call stats_1d_add_entry(stats_llps_num_frac, 0d0, i_index)
+        end if
+        tot_org_part_mass_conc = sum(org_masses * num_concs)
+        if (tot_org_part_mass_conc > 0d0) then
+           call stats_1d_add_entry(stats_llps_org_frac, &
+                sum(org_masses * num_concs, mask=is_separated) &
+                / tot_org_part_mass_conc, i_index)
+        else
+           call stats_1d_add_entry(stats_llps_org_frac, 0d0, i_index)
+        end if
+        diam_srh_dist = bin_grid_histogram_2d(diam_grid, dry_diameters, &
+             srh_grid, srhs, merge(num_concs, 0d0, is_mixed))
+        call stats_2d_add(stats_diam_srh_dist, diam_srh_dist)
+
+        ! critical supersaturation of every particle by kappa-Koehler
+        ! theory, with the solute kappa of the dry particle (the volume
+        ! average over the species; for the organic species 0.11 OM:OC
+        ! - 0.10 as in CMAQ), once with the surface tension of water and
+        ! once with the effective surface tension of an organic film
+        ! (aero_particle_crit_rel_humid_est). For particles without
+        ! soluble material the effective surface tension is not defined
+        ! (that function then returns a critical relative humidity of 1),
+        ! so they keep the value with the surface tension of water
+        scs = aero_state_crit_rel_humids(aero_state, aero_data, env_state) &
+             - 1d0
+        scs_est = aero_state_crit_rel_humids_est(aero_state, aero_data, &
+             env_state) - 1d0
+        do i_part = 1,aero_state_n_part(aero_state)
+           kappas(i_part) = aero_particle_solute_kappa( &
+                aero_state%apa%particle(i_part), aero_data)
+           if (kappas(i_part) < 1d-30) scs_est(i_part) = scs(i_part)
+        end do
+        do i_ss = 1,N_SS
+           call stats_1d_add_entry(stats_ccn_conc(i_ss), &
+                sum(num_concs, mask=(scs <= CCN_SS(i_ss) / 100d0)), i_index)
+           call stats_1d_add_entry(stats_ccn_est_conc(i_ss), &
+                sum(num_concs, mask=(scs_est <= CCN_SS(i_ss) / 100d0)), &
+                i_index)
+        end do
+        diam_sc_dist = bin_grid_histogram_2d(diam_grid, dry_diameters, &
+             sc_grid, scs, num_concs)
+        call stats_2d_add(stats_diam_sc_dist, diam_sc_dist)
+        diam_sc_est_dist = bin_grid_histogram_2d(diam_grid, dry_diameters, &
+             sc_grid, scs_est, num_concs)
+        call stats_2d_add(stats_diam_sc_est_dist, diam_sc_est_dist)
+        diam_kappa_dist = bin_grid_histogram_2d(diam_grid, dry_diameters, &
+             kappa_grid, kappas, num_concs)
+        call stats_2d_add(stats_diam_kappa_dist, diam_kappa_dist)
+
      end do
 
      call make_filename(out_filename, prefix, "_process.nc", index)
@@ -220,6 +349,9 @@ program process
      call bin_grid_output_netcdf(diam_grid, ncid, "diam", unit="m")
      call bin_grid_output_netcdf(o_c_grid, ncid, "o_c", unit="1")
      call bin_grid_output_netcdf(frac_grid, ncid, "sec_frac", unit="1")
+     call bin_grid_output_netcdf(sc_grid, ncid, "sc", unit="1")
+     call bin_grid_output_netcdf(kappa_grid, ncid, "kappa", unit="1")
+     call bin_grid_output_netcdf(srh_grid, ncid, "srh", unit="1")
 
      call stats_1d_output_netcdf(stats_num_dist, ncid, "num_dist", &
           dim_name="diam", unit="m^{-3}")
@@ -233,6 +365,24 @@ program process
           "diam_sec_frac_dist", dim_name_1="diam", dim_name_2="sec_frac", &
           unit="m^{-3}")
      call stats_2d_clear(stats_diam_sec_frac_dist)
+
+     call stats_2d_output_netcdf(stats_diam_srh_dist, ncid, "diam_srh_dist", &
+          dim_name_1="diam", dim_name_2="srh", unit="m^{-3}")
+     call stats_2d_clear(stats_diam_srh_dist)
+
+     call stats_2d_output_netcdf(stats_diam_sc_dist, ncid, "diam_sc_dist", &
+          dim_name_1="diam", dim_name_2="sc", unit="m^{-3}")
+     call stats_2d_clear(stats_diam_sc_dist)
+
+     call stats_2d_output_netcdf(stats_diam_sc_est_dist, ncid, &
+          "diam_sc_est_dist", dim_name_1="diam", dim_name_2="sc", &
+          unit="m^{-3}")
+     call stats_2d_clear(stats_diam_sc_est_dist)
+
+     call stats_2d_output_netcdf(stats_diam_kappa_dist, ncid, &
+          "diam_kappa_dist", dim_name_1="diam", dim_name_2="kappa", &
+          unit="m^{-3}")
+     call stats_2d_clear(stats_diam_kappa_dist)
 
      call pmc_nc_close(ncid)
   end do
@@ -261,6 +411,21 @@ program process
        dim_name="time", unit="1")
   call stats_1d_output_netcdf(stats_sec_o_c, ncid, "sec_o_c", &
        dim_name="time", unit="1")
+  call stats_1d_output_netcdf(stats_rel_humid, ncid, "rel_humid", &
+       dim_name="time", unit="1")
+  call stats_1d_output_netcdf(stats_mixed_num_frac, ncid, &
+       "mixed_num_frac", dim_name="time", unit="1")
+  call stats_1d_output_netcdf(stats_llps_num_frac, ncid, "llps_num_frac", &
+       dim_name="time", unit="1")
+  call stats_1d_output_netcdf(stats_llps_org_frac, ncid, &
+       "llps_org_mass_frac", dim_name="time", unit="1")
+  do i_ss = 1,N_SS
+     call stats_1d_output_netcdf(stats_ccn_conc(i_ss), ncid, &
+          "ccn_conc_" // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
+     call stats_1d_output_netcdf(stats_ccn_est_conc(i_ss), ncid, &
+          "ccn_est_conc_" // CCN_SS_NAME(i_ss), dim_name="time", &
+          unit="m^{-3}")
+  end do
   call pmc_nc_close(ncid)
 
   call pmc_mpi_finalize()
