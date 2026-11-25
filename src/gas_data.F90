@@ -25,6 +25,59 @@ module pmc_gas_data
   !> Maximum length of the name of a gas.
   integer, parameter :: GAS_NAME_LEN = 100
 
+  !> Names of the gas species of MOSAIC in the order of the MOSAIC gas
+  !! species indices: the common mechanism, the gas species of the
+  !! organic aerosol block of CRACMM3 (CMAQ 6.0; the vapors of the
+  !! semivolatile aerosol species first), and the urban, biogenic and
+  !! marine mechanisms of CBM-Z. The list is generated from the
+  !! mechanism file of CMAQ together with the tables of MOSAIC and is
+  !! checked against them in mosaic_init().
+  integer, parameter :: GAS_MOSAIC_N_SPEC = 161
+  character(len=GAS_NAME_LEN), parameter :: &
+       GAS_MOSAIC_SPEC_NAME(GAS_MOSAIC_N_SPEC) &
+       = [character(len=GAS_NAME_LEN) :: &
+       "H2SO4",        "HNO3",         "HCl",          "NH3", &
+       "NO",           "NO2",          "NO3",          "N2O5", &
+       "HONO",         "HNO4",         "O3",           "O1D", &
+       "O3P",          "OH",           "HO2",          "H2O2", &
+       "CO",           "SO2",          "CH4",          "C2H6", &
+       "CH3O2",        "ETHP",         "HCHO",         "CH3OH", &
+       "ANOL",         "CH3OOH",       "ETHOOH",       "ALD2", &
+       "HCOOH",        "RCOOH",        "C2O3",         "PAN", &
+       "VHOM",         "VELHOM",       "VOP3",         "VROCN2ALK", &
+       "VROCN1ALK",    "VROCP0ALK",    "VROCP1ALK",    "VROCP2ALK", &
+       "VROCP3ALK",    "VROCN2OXY2",   "VROCN2OXY4",   "VROCN2OXY8", &
+       "VROCN1OXY1",   "VROCN1OXY3",   "VROCN1OXY6",   "VROCP0OXY2", &
+       "VROCP0OXY4",   "VROCP1OXY1",   "VROCP1OXY3",   "VROCP2OXY2", &
+       "VROCP3OXY2",   "VTRPN",        "VHONIT",       "VMTN1", &
+       "PINAL",        "PINALP",       "LIMAL",        "LIMALP", &
+       "BALD",         "BENZ",         "OPB",          "BENP", &
+       "PHEN",         "SOATOL",       "TOLP",         "CSL", &
+       "SOAXYL",       "XYLP",         "EBZ",          "EBZP", &
+       "APIP1",        "APIP2",        "LIMP1",        "LIMP2", &
+       "BALP",         "CHO",          "HC10P",        "APINP1", &
+       "APINP2",       "LIMNP1",       "LIMNP2",       "VROCP4OXY2", &
+       "FURANONE",     "VROCIOXY",     "SLOWROC",      "FURAN", &
+       "FURANO2",      "SESQ",         "SESQNRO2",     "SESQRO2", &
+       "VROCP6ALK",    "VROCP6ALKP",   "VROCP5ALK",    "VROCP5ALKP", &
+       "VROCP4ALK",    "VROCP4ALKP",   "VROCP3ALKP",   "VROCP2ALKP", &
+       "VROCP1ALKP",   "HC10",         "VROCP6ALKP2",  "VROCP5ALKP2", &
+       "VROCP4ALKP2",  "VROCP3ALKP2",  "VROCP2ALKP2",  "VROCP1ALKP2", &
+       "HC10P2",       "VROCP6ARO",    "VROCP6AROP",   "VROCP5ARO", &
+       "VROCP5AROP",   "NAPH",         "NAPHP",        "VROCP5OXY1", &
+       "VROCP6OXY1",   "STY",          "STYP",         "PAR", &
+       "AONE",         "MGLY",         "ETH",          "OLET", &
+       "OLEI",         "TOL",          "XYL",          "CRES", &
+       "TO2",          "CRO",          "OPEN",         "ONIT", &
+       "ROOH",         "RO2",          "ANO2",         "NAP", &
+       "XO2",          "XPAR",         "ISOP",         "ISOPRD", &
+       "ISOPP",        "ISOPN",        "ISOPO2",       "API", &
+       "LIM",          "ISPX",         "EPOX",         "BPIN", &
+       "XO2N",         "HPLD",         "DMS",          "MSA", &
+       "DMSO",         "DMSO2",        "CH3SO2H",      "CH3SCH2OO", &
+       "CH3SO2",       "CH3SO3",       "CH3SO2OO",     "CH3SO2CH2OO", &
+       "SULFHOX"]
+
   !> Constant gas data.
   !!
   !! Each gas species is identified by an integer \c i between 1 and
@@ -155,52 +208,13 @@ contains
     !> Gas data.
     type(gas_data_t), intent(inout) :: gas_data
 
-    ! Species in the order of the MOSAIC gas species indices: the
-    ! common mechanism, the semivolatile organic vapors of the VBS-style
-    ! SOA scheme (CMAQ AERO7 names, replacing the SORGAM species), and
-    ! the urban, biogenic and marine mechanisms. The urban and biogenic
-    ! mechanisms include the SOA precursors and SOA tracer species.
-    integer, parameter :: n_mosaic_species = 113
-    character(len=GAS_NAME_LEN), parameter, dimension(n_mosaic_species) &
-         :: mosaic_species = [character(len=GAS_NAME_LEN) :: &
-         "H2SO4",        "HNO3",         "HCl",          "NH3", &
-         "NO",           "NO2",          "NO3",          "N2O5", &
-         "HONO",         "HNO4",         "O3",           "O1D", &
-         "O3P",          "OH",           "HO2",          "H2O2", &
-         "CO",           "SO2",          "CH4",          "C2H6", &
-         "CH3O2",        "ETHP",         "HCHO",         "CH3OH", &
-         "ANOL",         "CH3OOH",       "ETHOOH",       "ALD2", &
-         "HCOOH",        "RCOOH",        "C2O3",         "PAN", &
-         "SVAVB1",       "SVAVB2",       "SVAVB3",       "SVAVB4", &
-         "SVMT1",        "SVMT2",        "SVMT3",        "SVMT4", &
-         "SVMT5",        "SVMT6",        "MTNO3",        "SVISO1", &
-         "SVISO2",       "SVSQT",        "VLVPO1",       "VSVPO1", &
-         "VSVPO2",       "VSVPO3",       "VIVPO1",       "VLVOO1", &
-         "VLVOO2",       "VSVOO1",       "VSVOO2",       "VSVOO3", &
-         "LVPCSOG",      "MTNO3H",       "VMTN1", &
-         "PAR",          "AONE",         "MGLY",         "ETH", &
-         "OLET",         "OLEI",         "TOL",          "XYL", &
-         "CRES",         "TO2",          "CRO",          "OPEN", &
-         "ONIT",         "ROOH",         "RO2",          "ANO2", &
-         "NAP",          "XO2",          "XPAR", &
-         "BENZ",         "NAPH",         "SOAALK",       "PCVOC", &
-         "TOLRO2",       "XYLRO2",       "BENZRO2",      "PAHRO2", &
-         "SOATOL",       "SOAXYL", &
-         "ISOP",         "ISOPRD",       "ISOPP",        "ISOPN", &
-         "ISOPO2",       "API",          "LIM",          "SESQ", &
-         "TERPNRO2",     "ISPX",         "EPOX",         "BPIN", &
-         "XO2N", "HPLD", &
-         "DMS",          "MSA",          "DMSO",         "DMSO2", &
-         "CH3SO2H",      "CH3SCH2OO",    "CH3SO2",       "CH3SO3", &
-         "CH3SO2OO",     "CH3SO2CH2OO",  "SULFHOX"]
-
     integer spec, mosaic_spec, i
 
     gas_data%mosaic_index = 0
     do spec = 1,gas_data_n_spec(gas_data)
        mosaic_spec = 0
-       do i = 1,n_mosaic_species
-          if (gas_data%name(spec) == mosaic_species(i)) then
+       do i = 1,GAS_MOSAIC_N_SPEC
+          if (gas_data%name(spec) == GAS_MOSAIC_SPEC_NAME(i)) then
              mosaic_spec = i
           end if
        end do

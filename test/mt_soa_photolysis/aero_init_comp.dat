@@ -1,4 +1,4 @@
-#    mass fractions (ammonium sulfate and monoterpene SOA of the lowest volatility)
+#    mass fractions (ammonium sulfate and highly oxygenated molecules of the monoterpene SOA)
 SO4             0.364
 NH4             0.136
-AMT1            0.5
+AHOM            0.5

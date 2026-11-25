@@ -81,7 +81,7 @@ contains
     use module_data_mosaic_main, only: tbeg_sec, dt_sec, rlon, rlat, &
          zalt_m, RH, te, pr_atm, cair_mlc, cair_molm3, ppb, avogad, &
          mmode, mgas, maer, mcld, maeroptic, mshellcore, &
-         msolar, mphoto, lun_aeroptic, naerbin
+         msolar, mphoto, lun_aeroptic, naerbin, ngas_max
 
     use module_data_mosaic_gas, only: nphoto, rk_photo_fixed, &
          jphoto_no2, jphoto_no3, jphoto_hono, jphoto_hno3, jphoto_hno4, &
@@ -90,10 +90,13 @@ contains
          jphoto_aone, jphoto_mgly, jphoto_open, jphoto_rooh, jphoto_onit, &
          jphoto_isoprd
 
-    use module_data_mosaic_soa, only: nsoa, nsoa_sv, soa_name_a, soa_mw, &
-         nsoa_prxn, soa_prxn_from, soa_prxn_to, lsv_pcso, lnv_pcso2, &
-         lsv_mtno3, lsv_mtno3h, lsv_mt1, lsv_mt6, lsv_mtn1, &
-         soa_cstar_298, soa_iepox_acidity
+    use module_data_mosaic_gas, only: icr
+
+    use module_data_mosaic_soa, only: nsoa, soa_name_a, soa_mw, &
+         nsoa_prxn, soa_prxn_from, soa_prxn_to, nsoa_phot, soa_phot_from, &
+         soa_phot_to, soa_iepox_acidity
+
+    use module_data_mosaic_cracmm, only: ncr, cr_name
 #endif
 
     !> Environment state.
@@ -118,8 +121,9 @@ contains
     real(kind=dp), intent(in), optional :: ho2_uptake_coeff
 
 #ifdef PMC_USE_MOSAIC
-    integer :: i_soa, i_spec, i_rxn, n_rxn
-    character(len=8) :: rxn_from(nsoa_prxn + 7), rxn_to(nsoa_prxn + 7)
+    integer :: i_soa, i_spec, i_rxn, n_rxn, i_cr
+    character(len=12) :: rxn_from(nsoa_prxn + nsoa_phot)
+    character(len=12) :: rxn_to(nsoa_prxn + nsoa_phot)
 
     ! MOSAIC function interfaces
     interface
@@ -241,24 +245,31 @@ contains
        end if
     end do
 
-    ! the products of the particle-phase reactions of the organic species
-    ! (oligomerization, nitrate hydrolysis, aging of potential combustion
-    ! SOA, photolysis of the monoterpene SOA) must be aerosol species too,
-    ! or the mass that reacts is lost
-    rxn_from(1:nsoa_prxn) = soa_name_a(soa_prxn_from)
-    rxn_to(1:nsoa_prxn) = soa_name_a(nsoa_sv + soa_prxn_to)
-    rxn_from(nsoa_prxn + 1) = soa_name_a(lsv_pcso)
-    rxn_to(nsoa_prxn + 1) = soa_name_a(nsoa_sv + lnv_pcso2)
-    n_rxn = nsoa_prxn + 1
-    do i_soa = lsv_mt1,lsv_mt6
-       ! the monoterpene SOA species that photolyze: those not more
-       ! volatile than the product
-       if (soa_cstar_298(i_soa) <= soa_cstar_298(lsv_mtn1)) then
-          n_rxn = n_rxn + 1
-          rxn_from(n_rxn) = soa_name_a(i_soa)
-          rxn_to(n_rxn) = soa_name_a(lsv_mtn1)
-       end if
+    ! the gas species list of PartMC must be that of MOSAIC: the species
+    ! of the organic aerosol block of CRACMM3 are generated from the
+    ! mechanism file of CMAQ on both sides
+    call assert_msg(735028164, GAS_MOSAIC_N_SPEC == ngas_max, &
+         "the number of MOSAIC gas species in gas_data (" &
+         // trim(integer_to_string(GAS_MOSAIC_N_SPEC)) // ") differs " &
+         // "from that of the MOSAIC library (" &
+         // trim(integer_to_string(ngas_max)) // ")")
+    do i_cr = 1,ncr
+       call assert_msg(735028165, &
+            trim(GAS_MOSAIC_SPEC_NAME(icr(i_cr))) == trim(cr_name(i_cr)), &
+            "MOSAIC gas species " // trim(integer_to_string(icr(i_cr))) &
+            // " is " // trim(cr_name(i_cr)) // " in the MOSAIC library " &
+            // "and " // trim(GAS_MOSAIC_SPEC_NAME(icr(i_cr))) &
+            // " in gas_data")
     end do
+
+    ! the products of the particle-phase reactions of the organic species
+    ! (hydrolysis of the organic nitrates, photolysis) must be aerosol
+    ! species too, or the mass that reacts is lost
+    n_rxn = nsoa_prxn + nsoa_phot
+    rxn_from(1:nsoa_prxn) = soa_name_a(soa_prxn_from)
+    rxn_to(1:nsoa_prxn) = soa_name_a(soa_prxn_to)
+    rxn_from(nsoa_prxn + 1:n_rxn) = soa_name_a(soa_phot_from)
+    rxn_to(nsoa_prxn + 1:n_rxn) = soa_name_a(soa_phot_to)
     do i_rxn = 1,n_rxn
        if ((aero_data_spec_by_name(aero_data, trim(rxn_from(i_rxn))) > 0) &
             .and. (aero_data_spec_by_name(aero_data, trim(rxn_to(i_rxn))) &
@@ -269,20 +280,6 @@ contains
                // "aerosol species: the mass that reacts is lost")
        end if
     end do
-
-    ! the monoterpene nitrate is formed as a stable and a hydrolyzable
-    ! species; both must be aerosol species, or the hydrolyzable part
-    ! that partitions to the particles is lost
-    if ((aero_data_spec_by_name(aero_data, &
-         trim(soa_name_a(lsv_mtno3))) > 0) &
-         .and. (aero_data_spec_by_name(aero_data, &
-         trim(soa_name_a(lsv_mtno3h))) <= 0)) then
-       call warn_msg(660418332, "aerosol species " &
-            // trim(soa_name_a(lsv_mtno3)) // " is present without " &
-            // trim(soa_name_a(lsv_mtno3h)) // ", the hydrolyzable " &
-            // "monoterpene nitrate of MOSAIC: the part of the nitrate " &
-            // "that is formed as this species is lost")
-    end if
 
 #endif
 

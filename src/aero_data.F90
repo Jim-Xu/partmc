@@ -38,19 +38,21 @@ module pmc_aero_data
   !!
   !! These are MSA, the species of the former SORGAM scheme (kept so that
   !! older species data files are still interpreted correctly), the
-  !! primary organic carbon OC, and the organic species of the VBS-style
-  !! SOA scheme in MOSAIC (CMAQ AERO7 names).
-  character(len=AERO_NAME_LEN), parameter :: AERO_ORGANIC_SPEC_NAME(43) = &
+  !! primary organic carbon OC, and the organic aerosol species of
+  !! CRACMM3 (CMAQ 6.0) in MOSAIC (generated list).
+  character(len=AERO_NAME_LEN), parameter :: AERO_ORGANIC_SPEC_NAME(41) = &
        [character(len=AERO_NAME_LEN) :: &
-       "MSA",    "ARO1",   "ARO2",   "ALK1",   "OLE1", &
-       "API1",   "API2",   "LIM1",   "LIM2",   "OC", &
-       "AAVB1",  "AAVB2",  "AAVB3",  "AAVB4",  "AMT1", &
-       "AMT2",   "AMT3",   "AMT4",   "AMT5",   "AMT6", &
-       "AMTNO3", "AISO1",  "AISO2",  "ASQT",   "ALVPO1", &
-       "ASVPO1", "ASVPO2", "ASVPO3", "AIVPO1", "ALVOO1", &
-       "ALVOO2", "ASVOO1", "ASVOO2", "ASVOO3", "APCSO", &
-       "AOLGA",  "AOLGB",  "AMTHYD", "AISO3",  "AGLY", &
-       "APCSO2", "AMTNO3H", "AMTN1"]
+       "MSA",         "ARO1",        "ARO2",        "ALK1", &
+       "OLE1",        "API1",        "API2",        "LIM1", &
+       "LIM2",        "OC",          "AHOM",        "AELHOM", &
+       "AOP3",        "AROCN2ALK",   "AROCN1ALK",   "AROCP0ALK", &
+       "AROCP1ALK",   "AROCP2ALK",   "AROCP3ALK",   "AROCN2OXY2", &
+       "AROCN2OXY4",  "AROCN2OXY8",  "AROCN1OXY1",  "AROCN1OXY3", &
+       "AROCN1OXY6",  "AROCP0OXY2",  "AROCP0OXY4",  "AROCP1OXY1", &
+       "AROCP1OXY3",  "AROCP2OXY2",  "AROCP3OXY2",  "ATRPN", &
+       "AHONIT",      "AMTN1",       "AISO3NOS",    "AISO3OS", &
+       "AORGC",       "ASOAT",       "AISO4",       "AISO5", &
+       "AGLYOLIG"]
 
   !> Aerosol material properties and associated data.
   !!
@@ -423,24 +425,22 @@ contains
     ! Species in the order of the MOSAIC aerosol species indices: the
     ! inorganic semivolatile species, the semivolatile organic species,
     ! the nonvolatile inorganic and primary species, and the nonvolatile
-    ! organic species. The organic species are those of the VBS-style
-    ! SOA scheme (CMAQ AERO7 names), which replaced the SORGAM species,
-    ! the aged potential combustion SOA APCSO2, the hydrolyzable
-    ! monoterpene nitrate AMTNO3H and the photolysis product of the
-    ! monoterpene SOA, AMTN1.
-    integer, parameter :: n_mosaic_spec = 44
+    ! organic species. The organic species are those of CRACMM3
+    ! (CMAQ 6.0; generated list).
+    integer, parameter :: n_mosaic_spec = 42
     character(AERO_NAME_LEN), parameter, dimension(n_mosaic_spec) :: &
          mosaic_spec_name = [character(len=AERO_NAME_LEN) :: &
-         "SO4",    "NO3",    "Cl",     "NH4",    "MSA", &
-         "AAVB1",  "AAVB2",  "AAVB3",  "AAVB4",  "AMT1", &
-         "AMT2",   "AMT3",   "AMT4",   "AMT5",   "AMT6", &
-         "AMTNO3", "AISO1",  "AISO2",  "ASQT",   "ALVPO1", &
-         "ASVPO1", "ASVPO2", "ASVPO3", "AIVPO1", "ALVOO1", &
-         "ALVOO2", "ASVOO1", "ASVOO2", "ASVOO3", "APCSO", &
-         "AMTNO3H", "AMTN1", &
-         "CO3",    "Na",     "Ca",     "OIN",    "OC", &
-         "BC",     "AOLGA",  "AOLGB",  "AMTHYD", "AISO3", &
-         "AGLY",   "APCSO2"]
+         "SO4",         "NO3",         "Cl",          "NH4", &
+         "MSA",         "AHOM",        "AELHOM",      "AOP3", &
+         "AROCN2ALK",   "AROCN1ALK",   "AROCP0ALK",   "AROCP1ALK", &
+         "AROCP2ALK",   "AROCP3ALK",   "AROCN2OXY2",  "AROCN2OXY4", &
+         "AROCN2OXY8",  "AROCN1OXY1",  "AROCN1OXY3",  "AROCN1OXY6", &
+         "AROCP0OXY2",  "AROCP0OXY4",  "AROCP1OXY1",  "AROCP1OXY3", &
+         "AROCP2OXY2",  "AROCP3OXY2",  "ATRPN",       "AHONIT", &
+         "AMTN1",       "CO3",         "Na",          "Ca", &
+         "OIN",         "OC",          "BC",          "AISO3NOS", &
+         "AISO3OS",     "AORGC",       "ASOAT",       "AISO4", &
+         "AISO5",       "AGLYOLIG"]
 
     integer :: i_spec, i_mosaic_spec, i
 

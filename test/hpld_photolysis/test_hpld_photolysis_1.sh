@@ -12,6 +12,6 @@ mkdir -p out
 ../../partmc run_part.spec
 ../../extract_gas out/hpld_photolysis_0001
 
-# HPLD (column 103) against the exponential decay at 0.055 times the
+# HPLD (column 151) against the exponential decay at 0.055 times the
 # photolysis frequency of NO2
-../../numeric_diff --by col --min-col 103 --max-col 103 --rel-tol 1e-4 ref_hpld_photolysis_gas.txt out/hpld_photolysis_0001_gas.txt
+../../numeric_diff --by col --min-col 151 --max-col 151 --rel-tol 1e-4 ref_hpld_photolysis_gas.txt out/hpld_photolysis_0001_gas.txt
