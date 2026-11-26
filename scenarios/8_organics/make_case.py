@@ -51,6 +51,15 @@ CASE = {
     # exchange with the background (regional) air: e-folding time of
     # one day
     "exchange_rate": 1.0 / 86400.0,    # s^{-1}
+    # the particles of the background air enter deliquesced (on the
+    # upper leg of the water hysteresis of MOSAIC): the regional air has
+    # the same humid nights as the box (relative humidity 0.90, above
+    # their deliquescence point), so its particles stay liquid in the
+    # daytime (relative humidity at least 0.53, above the efflorescence
+    # point of MOSAIC, 0.35). Otherwise they enter dry, as all new
+    # particles of PartMC, and those that enter in the daytime stay dry
+    # until the night and take up no IEPOX
+    "background_deliquesced": True,
     # urban increment of CO in the initial air
     "delta_co": 200.0,                 # ppb
     # land cover for the biogenic emissions: fractions of the plant
@@ -78,6 +87,8 @@ CASES = {
     "forest": {"delta_co": 0.0},           # without the city
     "urban": {"land_cover": {}},           # without the biogenic emissions
     "urban_forest_nodep": {"deposition": False},   # without deposition
+    # background particles enter dry, as before 2026-11-26
+    "urban_forest_drybg": {"background_deliquesced": False},
 }
 
 ######################################################################
@@ -496,7 +507,7 @@ gas_emissions gas_emit.dat      # gas emissions file
 gas_background gas_back.dat     # background gas concentrations file
 aero_emissions aero_emit.dat    # aerosol emissions file
 aero_background aero_back.dat   # aerosol background file
-%(loss_lines)s
+%(background_line)s%(loss_lines)s
 rel_humidity %(rel_humidity)g               # initial relative humidity (1)
 latitude %(latitude)g                     # latitude (degrees, -90 to 90)
 longitude %(longitude)g                   # longitude (degrees, -180 to 180)
@@ -682,8 +693,12 @@ def main(name):
         loss_lines = ("loss_function none              # loss function "
                       "specification\n")
 
+    background_line = ("aero_background_deliquesced yes # background "
+                       "particles enter deliquesced\n"
+                       if case["background_deliquesced"] else "")
     write("organics.spec", SPEC % dict(case, t_max=t_max,
                                        start_time=start_time,
+                                       background_line=background_line,
                                        loss_lines=loss_lines))
     print("initial gases (ppb): " + ", ".join(
         "%s %.3g" % (k, gas[k]) for k in ["CO", "NO", "NO2", "O3", "SO2",

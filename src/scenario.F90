@@ -153,6 +153,10 @@ module pmc_scenario
      !> Whether air leaving the mixed layer is kept in a residual layer
      !> above it and entrained again when the mixed layer grows.
      logical :: do_residual_layer = .false.
+
+     !> Whether the particles of the aerosol background enter deliquesced
+     !> (on the upper leg of the water hysteresis) instead of dry.
+     logical :: aero_background_deliquesced = .false.
   end type scenario_t
 
   !> Residual layer above the mixed layer.
@@ -445,7 +449,8 @@ contains
     ! addition from background
     call aero_state_add_aero_dist_sample(aero_state, aero_data, &
          background, 1d0 - p, characteristic_factor, env_state%elapsed_time, &
-         allow_doubling, allow_halving, n_dil_in)
+         allow_doubling, allow_halving, n_dil_in, &
+         water_hyst_leg=scenario_background_hyst_leg(scenario))
 
     ! particle loss function
     call scenario_particle_loss(scenario, delta_t, aero_data, aero_state, &
@@ -463,6 +468,26 @@ contains
 #endif
 
   end subroutine scenario_update_aero_state
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Water hysteresis leg of the particles that enter from the aerosol
+  !> background: 1 (upper, deliquesced) with \c
+  !> aero_background_deliquesced in the spec file, else 0 (lower: dry
+  !> until the relative humidity exceeds their deliquescence point, as
+  !> all new particles).
+  elemental integer function scenario_background_hyst_leg(scenario)
+
+    !> Scenario data.
+    type(scenario_t), intent(in) :: scenario
+
+    if (scenario%aero_background_deliquesced) then
+       scenario_background_hyst_leg = 1
+    else
+       scenario_background_hyst_leg = 0
+    end if
+
+  end function scenario_background_hyst_leg
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -682,7 +707,8 @@ contains
           call aero_state_add_aero_dist_sample(residual_layer%aero_state, &
                aero_data, aero_background, 1d0 - p_dil, &
                characteristic_factor, env_state%elapsed_time, &
-               allow_doubling, allow_halving, n_bg)
+               allow_doubling, allow_halving, n_bg, &
+               water_hyst_leg=scenario_background_hyst_leg(scenario))
        end if
     end if
 
@@ -737,7 +763,8 @@ contains
                env_state%elapsed_time)) / delta_t
           call aero_state_add_aero_dist_sample(aero_state, aero_data, &
                aero_background, d_from_bg / h_new, characteristic_factor, &
-               env_state%elapsed_time, allow_doubling, allow_halving, n_bg)
+               env_state%elapsed_time, allow_doubling, allow_halving, n_bg, &
+               water_hyst_leg=scenario_background_hyst_leg(scenario))
           n_dil_in = n_dil_in + n_bg
        end if
        if (h_new >= residual_layer%top) then
@@ -1635,6 +1662,16 @@ contains
     !! <li> \b aero_background (string): the name of the file from which
     !!      to read the aerosol background profile --- the file format
     !!      should be \subpage input_format_aero_dist_profile
+    !! <li> \b aero_background_deliquesced (logical, optional, directly
+    !!      after \c aero_background): whether the particles that enter
+    !!      from the aerosol background are deliquesced, on the upper leg
+    !!      of the water hysteresis of MOSAIC, as particles of background
+    !!      air that has been humid enough are (they stay liquid until
+    !!      the relative humidity falls below their efflorescence point).
+    !!      If this line is omitted or \c no, they enter dry, as all new
+    !!      particles, and take up water only when the relative humidity
+    !!      exceeds their deliquescence point (particle-resolved runs
+    !!      only).
     !! <li> \b loss_function (string): the type of loss function ---
     !!      must be one of: \c none for no particle loss, \c constant
     !!      for constant loss rate, \c volume for particle loss proportional
@@ -1738,6 +1775,14 @@ contains
          read_aero_weight_classes, scenario%aero_dilution_time, &
          scenario%aero_dilution_rate, scenario%aero_background)
     call spec_file_close(sub_file)
+
+    ! optional water hysteresis state of the background particles
+    call spec_file_read_line(file, line, eof)
+    if (.not. eof) call spec_file_unread_line(file)
+    if ((.not. eof) .and. (line%name == 'aero_background_deliquesced')) then
+       call spec_file_read_logical(file, 'aero_background_deliquesced', &
+            scenario%aero_background_deliquesced)
+    end if
 
     ! loss function
     call spec_file_read_string(file, 'loss_function', function_name)
@@ -2091,7 +2136,8 @@ contains
          + pmc_mpi_pack_size_chamber(val%chamber) &
          + pmc_mpi_pack_size_real_array(val%gas_deposition_time) &
          + pmc_mpi_pack_size_real_array(val%gas_deposition_rate_scale) &
-         + pmc_mpi_pack_size_logical(val%do_residual_layer)
+         + pmc_mpi_pack_size_logical(val%do_residual_layer) &
+         + pmc_mpi_pack_size_logical(val%aero_background_deliquesced)
     if (allocated(val%gas_deposition_time)) then
        do i = 1,size(val%gas_deposition)
           total_size = total_size &
@@ -2167,6 +2213,8 @@ contains
     call pmc_mpi_pack_real_array(buffer, position, &
          val%gas_deposition_rate_scale)
     call pmc_mpi_pack_logical(buffer, position, val%do_residual_layer)
+    call pmc_mpi_pack_logical(buffer, position, &
+         val%aero_background_deliquesced)
     if (allocated(val%gas_deposition_time)) then
        do i = 1,size(val%gas_deposition)
           call pmc_mpi_pack_gas_state(buffer, position, &
@@ -2241,6 +2289,8 @@ contains
     call pmc_mpi_unpack_real_array(buffer, position, &
          val%gas_deposition_rate_scale)
     call pmc_mpi_unpack_logical(buffer, position, val%do_residual_layer)
+    call pmc_mpi_unpack_logical(buffer, position, &
+         val%aero_background_deliquesced)
     if (allocated(val%gas_deposition)) deallocate(val%gas_deposition)
     if (allocated(val%gas_deposition_time)) then
        allocate(val%gas_deposition(size(val%gas_deposition_time)))

@@ -757,7 +757,7 @@ contains
   !> aero_state, with the given sample proportion.
   subroutine aero_state_add_aero_dist_sample(aero_state, aero_data, &
        aero_dist, sample_prop, characteristic_factor, create_time, &
-       allow_doubling, allow_halving, n_part_add)
+       allow_doubling, allow_halving, n_part_add, water_hyst_leg)
 
     !> Aero state to add to.
     type(aero_state_t), intent(inout) :: aero_state
@@ -777,6 +777,10 @@ contains
     logical, intent(in) :: allow_halving
     !> Number of particles added.
     integer, intent(out), optional :: n_part_add
+    !> Water hysteresis leg of the new particles (0 = lower, the default:
+    !> dry until the relative humidity exceeds their deliquescence point;
+    !> 1 = upper: deliquesced).
+    integer, intent(in), optional :: water_hyst_leg
 
     real(kind=dp) :: n_samp_avg, radius, total_vol
     real(kind=dp) :: vols(aero_data_n_spec(aero_data))
@@ -823,6 +827,9 @@ contains
              call aero_particle_set_component(aero_particle, &
                   aero_dist%mode(i_mode)%source, create_time)
              aero_particle%n_primary_parts = 1
+             if (present(water_hyst_leg)) then
+                aero_particle%water_hyst_leg = water_hyst_leg
+             end if
              call aero_state_add_particle(aero_state, aero_particle, aero_data)
           end do
        end do
