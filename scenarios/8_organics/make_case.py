@@ -67,6 +67,13 @@ CASE = {
     # 7 broadleaf deciduous temperate tree, 1 needleleaf evergreen
     # temperate tree, 13 cool C3 grass
     "land_cover": {7: 0.50, 1: 0.25, 13: 0.25},
+    # factor on the monoterpene emissions (API, BPIN, LIM), for tests of
+    # the sensitivity to the amount of monoterpene SOA, which is
+    # uncertain: at loadings below 10 ug m^{-3} the CRACMM3 organic
+    # aerosol forms 2.5 to 4 times the SOA of the alpha-pinene ozonolysis
+    # experiments of Shilling et al. (2008), mostly as highly oxygenated
+    # molecules
+    "monoterpene_scale": 1.0,
     # PPFD transmission of the atmosphere (ratio of the PPFD above the
     # canopy to that at the top of the atmosphere), the value of the
     # standard conditions of MEGAN (Guenther et al., 2006)
@@ -89,6 +96,9 @@ CASES = {
     "urban_forest_nodep": {"deposition": False},   # without deposition
     # background particles enter dry, as before 2026-11-26
     "urban_forest_drybg": {"background_deliquesced": False},
+    # half and a quarter of the monoterpene emissions
+    "urban_forest_mt050": {"monoterpene_scale": 0.5},
+    "urban_forest_mt025": {"monoterpene_scale": 0.25},
 }
 
 ######################################################################
@@ -256,6 +266,8 @@ MEGAN_SPECIES = {
 }
 MOLEC_WEIGHT_BIO = {"ISOP": 68.12, "API": 136.23, "BPIN": 136.23,
                     "LIM": 136.23, "SESQ": 204.35}    # g/mol
+# species whose emissions the case parameter "monoterpene_scale" scales
+MONOTERPENES = ("API", "BPIN", "LIM")
 EMIT_STEP = 1800.0               # s, time step of the emission file
 
 ######################################################################
@@ -428,6 +440,8 @@ def biogenic_emissions(case):
                  for (pft, frac) in case["land_cover"].items())
         beta, ldf = MEGAN_PARAM[cls]
         spec = MEGAN_SPECIES[cls]
+        if spec in MONOTERPENES:
+            ef = case["monoterpene_scale"] * ef
         values = emit.setdefault(spec, [0.0] * len(times))
         for (i, t) in enumerate(times):
             tm = t + 0.5 * EMIT_STEP
