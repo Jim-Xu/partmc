@@ -19,6 +19,12 @@
 !> show what the per-particle composition changes: every particle with
 !> the average dry composition of all particles, and every particle with
 !> the average dry composition of the particles in its size section.
+!> The number and mass concentrations, the O:C, the phase separation and
+!> the CCN concentrations are also computed for the particles of each
+!> class by origin: the urban primary particles, the urban and regional
+!> particles joined by coagulation, the regional particles of the
+!> initial air, and the regional particles that the exchange with the
+!> background air brought in.
 program process
 
   use pmc_output
@@ -68,10 +74,23 @@ program process
   !> chem/module_mosaic_driver.F, init_data_mosaic_asect).
   real(kind=dp), parameter :: SECT_DIAM_MIN = 39.0625d-9
   real(kind=dp), parameter :: SECT_DIAM_MAX = 10d-6
+  !> Number of classes of particles by origin.
+  integer, parameter :: N_ORIGIN = 4
+  !> Names of the classes by origin (used in the names of the output
+  !> variables; see particle_origins below).
+  character(len=13), parameter :: ORIGIN_NAME(N_ORIGIN) = [ &
+       character(len=13) :: "city", "city_regional", "regional", &
+       "background"]
+  !> Source of the regional particles: the name of their mode in the
+  !> initial and in the background distribution (aero_init_dist.dat and
+  !> aero_back_dist.dat, written by make_case.py). The other sources are
+  !> the urban modes of the initial air.
+  character(len=AERO_SOURCE_NAME_LEN), parameter :: REGIONAL_SOURCE &
+       = "regional"
 
   character(len=PMC_MAX_FILENAME_LEN) :: in_filename, out_filename
   type(bin_grid_t) :: diam_grid, o_c_grid, frac_grid, sc_grid, kappa_grid, &
-       srh_grid
+       srh_grid, entry_grid
   type(aero_data_t) :: aero_data
   type(aero_state_t) :: aero_state
   type(env_state_t) :: env_state
@@ -89,7 +108,7 @@ program process
        diam_o_c_dist(:,:), diam_sec_frac_dist(:,:), org_masses(:), &
        srhs(:), scs(:), scs_est(:), kappas(:), &
        diam_srh_dist(:,:), diam_sc_dist(:,:), diam_sc_est_dist(:,:), &
-       diam_kappa_dist(:,:)
+       diam_kappa_dist(:,:), entry_times(:), entry_srh_dist(:,:)
   logical, allocatable :: is_mixed(:), is_separated(:)
   real(kind=dp) :: tot_org_part_mass_conc
   integer :: i_ss
@@ -99,6 +118,24 @@ program process
   real(kind=dp), allocatable :: mix_org_masses(:), mix_srhs(:), &
        mix_kappas(:), mix_scs(:), mix_scs_est(:)
   logical, allocatable :: mix_is_mixed(:), mix_is_separated(:)
+  integer :: i_origin
+  integer, allocatable :: origins(:)
+  logical, allocatable :: in_origin(:), is_dry(:), is_salt(:)
+  real(kind=dp) :: origin_org_mass_conc, origin_carbon_conc, &
+       origin_oxygen_conc
+  real(kind=dp), allocatable :: origin_spec_mass_concs(:,:)
+  type(stats_1d_t) :: stats_origin_num_dist(N_ORIGIN), &
+       stats_origin_num_conc(N_ORIGIN), &
+       stats_origin_mixed_num_conc(N_ORIGIN), &
+       stats_origin_llps_num_conc(N_ORIGIN), &
+       stats_origin_llps_org_mass_conc(N_ORIGIN), &
+       stats_origin_ccn_conc(N_SS, N_ORIGIN), &
+       stats_origin_ccn_est_conc(N_SS, N_ORIGIN), &
+       stats_origin_dry_mass_conc(N_ORIGIN), &
+       stats_origin_salt_mass_conc(N_ORIGIN), &
+       stats_origin_org_mass_conc(N_ORIGIN), &
+       stats_origin_group_mass_conc(N_GROUP, N_ORIGIN), &
+       stats_origin_o_c(N_ORIGIN), stats_origin_om_oc(N_ORIGIN)
   type(stats_1d_t) :: stats_num_dist, stats_tot_num_conc, &
        stats_tot_dry_mass_conc, stats_tot_org_mass_conc, &
        stats_tot_sec_org_mass_conc, stats_tot_o_c, stats_tot_om_oc, &
@@ -109,7 +146,7 @@ program process
        stats_mix_ccn_conc(N_SS, N_MIX), stats_mix_ccn_est_conc(N_SS, N_MIX)
   type(stats_2d_t) :: stats_diam_o_c_dist, stats_diam_sec_frac_dist, &
        stats_diam_srh_dist, stats_diam_sc_dist, stats_diam_sc_est_dist, &
-       stats_diam_kappa_dist
+       stats_diam_kappa_dist, stats_entry_srh_dist
 
   call pmc_mpi_init()
 
@@ -121,6 +158,11 @@ program process
   call bin_grid_make(sc_grid, BIN_GRID_TYPE_LOG, 50, 1d-4, 1d0)
   call bin_grid_make(kappa_grid, BIN_GRID_TYPE_LINEAR, 80, 0d0, 0.8d0)
   call bin_grid_make(srh_grid, BIN_GRID_TYPE_LINEAR, 50, 0d0, 1d0)
+  ! entry time of the particles in the box (s): one bin per hour of the
+  ! two days of the case, centered on the whole hours, so that the
+  ! particles of the initial air (entry time 0) are in the first bin
+  call bin_grid_make(entry_grid, BIN_GRID_TYPE_LINEAR, 49, -1800d0, &
+       174600d0)
 
   allocate(times(n_index))
 
@@ -299,6 +341,19 @@ program process
         diam_srh_dist = bin_grid_histogram_2d(diam_grid, dry_diameters, &
              srh_grid, srhs, merge(num_concs, 0d0, is_mixed))
         call stats_2d_add(stats_diam_srh_dist, diam_srh_dist)
+        ! the same against the time at which the oldest constituent of the
+        ! particle entered the box: 0 for the particles of the initial air,
+        ! the time of the exchange for those of the background air (see
+        ! particle_origins below)
+        if (allocated(entry_times)) deallocate(entry_times)
+        allocate(entry_times(aero_state_n_part(aero_state)))
+        do i_part = 1,aero_state_n_part(aero_state)
+           entry_times(i_part) &
+                = aero_state%apa%particle(i_part)%least_create_time
+        end do
+        entry_srh_dist = bin_grid_histogram_2d(entry_grid, entry_times, &
+             srh_grid, srhs, merge(num_concs, 0d0, is_mixed))
+        call stats_2d_add(stats_entry_srh_dist, entry_srh_dist)
 
         do i_ss = 1,N_SS
            call stats_1d_add_entry(stats_ccn_conc(i_ss), &
@@ -367,6 +422,98 @@ program process
            end do
         end do
 
+        ! the same diagnostics for the particles of each class by origin
+        ! (see particle_origins below): the number distribution and
+        ! concentration; the number concentrations of the particles with
+        ! organic matter and salt, of the separated particles and of the
+        ! CCN; the organic matter in the separated particles; and the
+        ! mass concentrations of the species in the particles of the
+        ! class, from which follow its dry, salt, organic and group mass
+        ! concentrations and the O:C and OM:OC of its organic matter
+        ! (weighted by carbon, as for all particles above)
+        origins = particle_origins(aero_state, aero_data)
+        if (allocated(origin_spec_mass_concs)) &
+             deallocate(origin_spec_mass_concs)
+        allocate(origin_spec_mass_concs(aero_data_n_spec(aero_data), &
+             N_ORIGIN))
+        origin_spec_mass_concs = 0d0
+        do i_part = 1,aero_state_n_part(aero_state)
+           origin_spec_mass_concs(:, origins(i_part)) &
+                = origin_spec_mass_concs(:, origins(i_part)) &
+                + num_concs(i_part) * aero_particle_species_masses( &
+                aero_state%apa%particle(i_part), aero_data)
+        end do
+        call assert_msg(620390712, all(abs(sum(origin_spec_mass_concs, 2) &
+             - spec_mass_concs) <= 1d-10 * spec_mass_concs), &
+             "the classes by origin do not add up to all particles")
+        if (allocated(is_dry)) deallocate(is_dry)
+        if (allocated(is_salt)) deallocate(is_salt)
+        allocate(is_dry(aero_data_n_spec(aero_data)), &
+             is_salt(aero_data_n_spec(aero_data)))
+        is_dry = .true.
+        if (aero_data%i_water > 0) is_dry(aero_data%i_water) = .false.
+        is_salt = .false.
+        do i_name = 1,size(SALT_SPEC)
+           i_spec = aero_data_spec_by_name(aero_data, SALT_SPEC(i_name))
+           if (i_spec > 0) is_salt(i_spec) = .true.
+        end do
+        do i_origin = 1,N_ORIGIN
+           in_origin = (origins == i_origin)
+           call stats_1d_add(stats_origin_num_dist(i_origin), &
+                bin_grid_histogram_1d(diam_grid, dry_diameters, &
+                merge(num_concs, 0d0, in_origin)))
+           call stats_1d_add_entry(stats_origin_num_conc(i_origin), &
+                sum(num_concs, mask=in_origin), i_index)
+           call stats_1d_add_entry(stats_origin_mixed_num_conc(i_origin), &
+                sum(num_concs, mask=(in_origin .and. is_mixed)), i_index)
+           call stats_1d_add_entry(stats_origin_llps_num_conc(i_origin), &
+                sum(num_concs, mask=(in_origin .and. is_separated)), i_index)
+           call stats_1d_add_entry(stats_origin_llps_org_mass_conc(i_origin), &
+                sum(org_masses * num_concs, &
+                mask=(in_origin .and. is_separated)), i_index)
+           do i_ss = 1,N_SS
+              call stats_1d_add_entry(stats_origin_ccn_conc(i_ss, i_origin), &
+                   sum(num_concs, mask=(in_origin &
+                   .and. (scs <= CCN_SS(i_ss) / 100d0))), i_index)
+              call stats_1d_add_entry( &
+                   stats_origin_ccn_est_conc(i_ss, i_origin), &
+                   sum(num_concs, mask=(in_origin &
+                   .and. (scs_est <= CCN_SS(i_ss) / 100d0))), i_index)
+           end do
+           call stats_1d_add_entry(stats_origin_dry_mass_conc(i_origin), &
+                sum(origin_spec_mass_concs(:, i_origin), mask=is_dry), &
+                i_index)
+           call stats_1d_add_entry(stats_origin_salt_mass_conc(i_origin), &
+                sum(origin_spec_mass_concs(:, i_origin), mask=is_salt), &
+                i_index)
+           origin_org_mass_conc = sum(origin_spec_mass_concs(:, i_origin), &
+                mask=(aero_data%om_oc > 0d0))
+           origin_carbon_conc = sum(origin_spec_mass_concs(:, i_origin) &
+                / aero_data%om_oc, mask=(aero_data%om_oc > 0d0))
+           origin_oxygen_conc = sum(origin_spec_mass_concs(:, i_origin) &
+                / aero_data%om_oc * aero_data%o_c, &
+                mask=(aero_data%om_oc > 0d0))
+           call stats_1d_add_entry(stats_origin_org_mass_conc(i_origin), &
+                origin_org_mass_conc, i_index)
+           if (origin_carbon_conc > 0d0) then
+              call stats_1d_add_entry(stats_origin_o_c(i_origin), &
+                   origin_oxygen_conc / origin_carbon_conc, i_index)
+              call stats_1d_add_entry(stats_origin_om_oc(i_origin), &
+                   origin_org_mass_conc / origin_carbon_conc, i_index)
+           else
+              call stats_1d_add_entry(stats_origin_o_c(i_origin), 0d0, &
+                   i_index)
+              call stats_1d_add_entry(stats_origin_om_oc(i_origin), 0d0, &
+                   i_index)
+           end if
+           do i_group = 1,N_GROUP
+              call stats_1d_add_entry( &
+                   stats_origin_group_mass_conc(i_group, i_origin), &
+                   group_mass_conc(aero_data, group_spec(:, i_group), &
+                   origin_spec_mass_concs(:, i_origin)), i_index)
+           end do
+        end do
+
      end do
 
      call make_filename(out_filename, prefix, "_process.nc", index)
@@ -379,10 +526,17 @@ program process
      call bin_grid_output_netcdf(sc_grid, ncid, "sc", unit="1")
      call bin_grid_output_netcdf(kappa_grid, ncid, "kappa", unit="1")
      call bin_grid_output_netcdf(srh_grid, ncid, "srh", unit="1")
+     call bin_grid_output_netcdf(entry_grid, ncid, "entry_time", unit="s")
 
      call stats_1d_output_netcdf(stats_num_dist, ncid, "num_dist", &
           dim_name="diam", unit="m^{-3}")
      call stats_1d_clear(stats_num_dist)
+     do i_origin = 1,N_ORIGIN
+        call stats_1d_output_netcdf(stats_origin_num_dist(i_origin), ncid, &
+             "num_dist_" // trim(ORIGIN_NAME(i_origin)), dim_name="diam", &
+             unit="m^{-3}")
+        call stats_1d_clear(stats_origin_num_dist(i_origin))
+     end do
 
      call stats_2d_output_netcdf(stats_diam_o_c_dist, ncid, "diam_o_c_dist", &
           dim_name_1="diam", dim_name_2="o_c", unit="m^{-3}")
@@ -396,6 +550,11 @@ program process
      call stats_2d_output_netcdf(stats_diam_srh_dist, ncid, "diam_srh_dist", &
           dim_name_1="diam", dim_name_2="srh", unit="m^{-3}")
      call stats_2d_clear(stats_diam_srh_dist)
+
+     call stats_2d_output_netcdf(stats_entry_srh_dist, ncid, &
+          "entry_time_srh_dist", dim_name_1="entry_time", dim_name_2="srh", &
+          unit="m^{-3}")
+     call stats_2d_clear(stats_entry_srh_dist)
 
      call stats_2d_output_netcdf(stats_diam_sc_dist, ncid, "diam_sc_dist", &
           dim_name_1="diam", dim_name_2="sc", unit="m^{-3}")
@@ -470,6 +629,50 @@ program process
              ncid, "ccn_est_conc_" // trim(MIX_NAME(i_mix)) // "_" &
              // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
      end do
+  end do
+  do i_origin = 1,N_ORIGIN
+     call stats_1d_output_netcdf(stats_origin_num_conc(i_origin), ncid, &
+          "num_conc_" // trim(ORIGIN_NAME(i_origin)), dim_name="time", &
+          unit="m^{-3}")
+     call stats_1d_output_netcdf(stats_origin_mixed_num_conc(i_origin), &
+          ncid, "mixed_num_conc_" // trim(ORIGIN_NAME(i_origin)), &
+          dim_name="time", unit="m^{-3}")
+     call stats_1d_output_netcdf(stats_origin_llps_num_conc(i_origin), &
+          ncid, "llps_num_conc_" // trim(ORIGIN_NAME(i_origin)), &
+          dim_name="time", unit="m^{-3}")
+     call stats_1d_output_netcdf(stats_origin_llps_org_mass_conc(i_origin), &
+          ncid, "llps_org_mass_conc_" // trim(ORIGIN_NAME(i_origin)), &
+          dim_name="time", unit="kg m^{-3}")
+     do i_ss = 1,N_SS
+        call stats_1d_output_netcdf(stats_origin_ccn_conc(i_ss, i_origin), &
+             ncid, "ccn_conc_" // trim(ORIGIN_NAME(i_origin)) // "_" &
+             // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
+        call stats_1d_output_netcdf( &
+             stats_origin_ccn_est_conc(i_ss, i_origin), ncid, &
+             "ccn_est_conc_" // trim(ORIGIN_NAME(i_origin)) // "_" &
+             // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
+     end do
+     call stats_1d_output_netcdf(stats_origin_dry_mass_conc(i_origin), &
+          ncid, "dry_mass_conc_" // trim(ORIGIN_NAME(i_origin)), &
+          dim_name="time", unit="kg m^{-3}")
+     call stats_1d_output_netcdf(stats_origin_salt_mass_conc(i_origin), &
+          ncid, "salt_mass_conc_" // trim(ORIGIN_NAME(i_origin)), &
+          dim_name="time", unit="kg m^{-3}")
+     call stats_1d_output_netcdf(stats_origin_org_mass_conc(i_origin), &
+          ncid, "org_mass_conc_" // trim(ORIGIN_NAME(i_origin)), &
+          dim_name="time", unit="kg m^{-3}")
+     do i_group = 1,N_GROUP
+        call stats_1d_output_netcdf( &
+             stats_origin_group_mass_conc(i_group, i_origin), ncid, &
+             "mass_conc_" // trim(GROUP_NAME(i_group)) // "_" &
+             // trim(ORIGIN_NAME(i_origin)), dim_name="time", &
+             unit="kg m^{-3}")
+     end do
+     call stats_1d_output_netcdf(stats_origin_o_c(i_origin), ncid, &
+          "o_c_" // trim(ORIGIN_NAME(i_origin)), dim_name="time", unit="1")
+     call stats_1d_output_netcdf(stats_origin_om_oc(i_origin), ncid, &
+          "om_oc_" // trim(ORIGIN_NAME(i_origin)), dim_name="time", &
+          unit="1")
   end do
   call pmc_nc_close(ncid)
 
@@ -668,6 +871,97 @@ contains
          "internal mixing changed species concentrations")
 
   end subroutine make_internal_mixture
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Class of every particle by the origin of its constituents.
+  !!
+  !! PartMC keeps for every particle the source and the creation time of
+  !! each primary particle that it is made of (its components, which
+  !! coagulation joins). The particles of the initial air are created at
+  !! time 0, those that the exchange with the background air brings in
+  !! at the time they enter. A particle is in the class
+  !! - 1 (city) if all its components are urban primary particles (the
+  !!   sources other than REGIONAL_SOURCE);
+  !! - 2 (city_regional) if it has urban and regional components;
+  !! - 3 (regional) if all its components are regional particles and one
+  !!   of them is from the initial air;
+  !! - 4 (background) if all its components are regional particles that
+  !!   entered after the start.
+  function particle_origins(aero_state, aero_data)
+
+    !> Aerosol state.
+    type(aero_state_t), intent(in) :: aero_state
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+
+    !> Class of every particle.
+    integer :: particle_origins(aero_state_n_part(aero_state))
+
+    integer :: i_part, i_comp, i_regional_source
+    logical :: has_city, has_initial, has_entered
+
+    i_regional_source = 0
+    if (aero_data_n_source(aero_data) > 0) then
+       i_regional_source = string_array_find(aero_data%source_name, &
+            REGIONAL_SOURCE)
+    end if
+    do i_part = 1,aero_state_n_part(aero_state)
+       call assert_msg(397166208, aero_particle_n_components( &
+            aero_state%apa%particle(i_part)) >= 1, &
+            "particle without components")
+       has_city = .false.
+       has_initial = .false.
+       has_entered = .false.
+       do i_comp = 1,aero_particle_n_components( &
+            aero_state%apa%particle(i_part))
+          if (aero_state%apa%particle(i_part)%component(i_comp)%source_id &
+               /= i_regional_source) then
+             has_city = .true.
+          elseif (aero_state%apa%particle(i_part)%component(i_comp) &
+               %create_time > 0d0) then
+             has_entered = .true.
+          else
+             has_initial = .true.
+          end if
+       end do
+       if (has_city .and. (has_initial .or. has_entered)) then
+          particle_origins(i_part) = 2
+       elseif (has_city) then
+          particle_origins(i_part) = 1
+       elseif (has_initial) then
+          particle_origins(i_part) = 3
+       else
+          particle_origins(i_part) = 4
+       end if
+    end do
+
+  end function particle_origins
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Mass concentration of a group of species (kg m^{-3}): the sum over
+  !> the species of the group that the aerosol data contain.
+  real(kind=dp) function group_mass_conc(aero_data, names, spec_mass_concs)
+
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+    !> Names of the species of the group (empty names are skipped).
+    character(len=*), intent(in) :: names(:)
+    !> Mass concentration of every species (kg m^{-3}).
+    real(kind=dp), intent(in) :: spec_mass_concs(:)
+
+    integer :: i_name, i_spec
+
+    group_mass_conc = 0d0
+    do i_name = 1,size(names)
+       if (len_trim(names(i_name)) == 0) cycle
+       i_spec = aero_data_spec_by_name(aero_data, names(i_name))
+       if (i_spec == 0) cycle
+       group_mass_conc = group_mass_conc + spec_mass_concs(i_spec)
+    end do
+
+  end function group_mass_conc
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
