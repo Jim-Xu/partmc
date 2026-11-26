@@ -106,6 +106,10 @@ module pmc_run_part
      integer :: iepox_acidity = MOSAIC_IEPOX_ACIDITY_ISORROPIA
      !> Uptake coefficient of HO2 on the particles in MOSAIC (1).
      real(kind=dp) :: ho2_uptake_coeff = MOSAIC_HO2_UPTAKE_COEFF_DEFAULT
+     !> Whether the particles of the initial aerosol distribution start
+     !> deliquesced (on the upper leg of the water hysteresis) instead of
+     !> dry.
+     logical :: aerosol_init_deliquesced = .false.
      !> Whether to have explicitly selected weighting.
      logical :: do_select_weighting
      !> Type of particle weighting scheme.
@@ -376,6 +380,7 @@ contains
          + pmc_mpi_pack_size_real_array(val%photolysis_rates) &
          + pmc_mpi_pack_size_integer(val%iepox_acidity) &
          + pmc_mpi_pack_size_real(val%ho2_uptake_coeff) &
+         + pmc_mpi_pack_size_logical(val%aerosol_init_deliquesced) &
          + pmc_mpi_pack_size_logical(val%do_select_weighting) &
          + pmc_mpi_pack_size_integer(val%weighting_type) &
          + pmc_mpi_pack_size_real(val%weighting_exponent) &
@@ -440,6 +445,7 @@ contains
     call pmc_mpi_pack_real_array(buffer, position, val%photolysis_rates)
     call pmc_mpi_pack_integer(buffer, position, val%iepox_acidity)
     call pmc_mpi_pack_real(buffer, position, val%ho2_uptake_coeff)
+    call pmc_mpi_pack_logical(buffer, position, val%aerosol_init_deliquesced)
     call pmc_mpi_pack_logical(buffer, position, val%do_select_weighting)
     call pmc_mpi_pack_integer(buffer, position, val%weighting_type)
     call pmc_mpi_pack_real(buffer, position, val%weighting_exponent)
@@ -505,6 +511,8 @@ contains
     call pmc_mpi_unpack_real_array(buffer, position, val%photolysis_rates)
     call pmc_mpi_unpack_integer(buffer, position, val%iepox_acidity)
     call pmc_mpi_unpack_real(buffer, position, val%ho2_uptake_coeff)
+    call pmc_mpi_unpack_logical(buffer, position, &
+         val%aerosol_init_deliquesced)
     call pmc_mpi_unpack_logical(buffer, position, val%do_select_weighting)
     call pmc_mpi_unpack_integer(buffer, position, val%weighting_type)
     call pmc_mpi_unpack_real(buffer, position, val%weighting_exponent)
@@ -699,6 +707,14 @@ contains
        call spec_file_read_aero_dist(sub_file, aero_data, &
             read_aero_weight_classes, aero_dist_init)
        call spec_file_close(sub_file)
+
+       ! optional water hysteresis state of the initial particles
+       call spec_file_read_line(file, line, eof)
+       if (.not. eof) call spec_file_unread_line(file)
+       if ((.not. eof) .and. (line%name == 'aerosol_init_deliquesced')) then
+          call spec_file_read_logical(file, 'aerosol_init_deliquesced', &
+               run_part_opt%aerosol_init_deliquesced)
+       end if
     end if
 
     call spec_file_read_scenario(file, gas_data, aero_data, &

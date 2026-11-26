@@ -397,6 +397,14 @@ contains
     !!   aerosol state at the start of the simulation (only provide
     !!   option if \c restart is \c no) --- the file format should
     !!   be \subpage input_format_aero_dist
+    !! - \b aerosol_init_deliquesced (logical, optional, directly after
+    !!   \c aerosol_init): whether the initial particles start
+    !!   deliquesced, on the upper leg of the water hysteresis of
+    !!   MOSAIC, as particles of air that has been humid enough are
+    !!   (they stay liquid until the relative humidity falls below
+    !!   their efflorescence point). If this line is omitted or \c no,
+    !!   they start dry, as all new particles, and take up water only
+    !!   when the relative humidity exceeds their deliquescence point
     !! - \subpage input_format_scenario
     !! - \subpage input_format_env_state
     !! - \b do_coagulation (logical): whether to perform particle
@@ -546,7 +554,8 @@ contains
           call aero_state_set_n_part_ideal(aero_state, n_part)
           call aero_state_add_aero_dist_sample(aero_state, aero_data, &
                aero_dist_init, 1d0, 1d0, 0d0, run_part_opt%allow_doubling, &
-               run_part_opt%allow_halving)
+               run_part_opt%allow_halving, water_hyst_leg=merge(1, 0, &
+               run_part_opt%aerosol_init_deliquesced))
        end if
        env_state = env_state_init
        call scenario_init_env_state(scenario, env_state, &
