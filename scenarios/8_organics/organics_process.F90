@@ -14,7 +14,11 @@
 !> supersaturation of every particle (kappa-Koehler theory with the
 !> surface tension of water and with the effective surface tension of
 !> the organic film) with the CCN concentrations at fixed
-!> supersaturations.
+!> supersaturations. The phase separation and the CCN concentrations are
+!> also computed for two internal mixtures of the same particles, to
+!> show what the per-particle composition changes: every particle with
+!> the average dry composition of all particles, and every particle with
+!> the average dry composition of the particles in its size section.
 program process
 
   use pmc_output
@@ -46,6 +50,24 @@ program process
   !> (those missing from the aerosol data are skipped).
   character(len=AERO_NAME_LEN), parameter :: SALT_SPEC(5) = [ &
        character(len=AERO_NAME_LEN) :: "SO4", "NO3", "NH4", "Cl", "Na"]
+  !> Number of internal mixtures.
+  integer, parameter :: N_MIX = 2
+  !> Names of the internal mixtures in the output variables: all
+  !> particles mixed, and the particles of each size section mixed.
+  character(len=7), parameter :: MIX_NAME(N_MIX) = [ &
+       character(len=7) :: "intmix", "sectmix"]
+  !> Whether the internal mixtures are mixed by size section.
+  logical, parameter :: MIX_SECTIONAL(N_MIX) = [.false., .true.]
+  !> Number of size sections.
+  integer, parameter :: N_SECT = 8
+  !> Lower edge of the first and upper edge of the last size section (dry
+  !> diameter, m); the sections are equally spaced in the logarithm of
+  !> the diameter, the upper edge of each twice its lower edge, and the
+  !> first and the last take the particles below and above. These are
+  !> the eight sections of MOSAIC in WRF-Chem (version 3.9.1,
+  !> chem/module_mosaic_driver.F, init_data_mosaic_asect).
+  real(kind=dp), parameter :: SECT_DIAM_MIN = 39.0625d-9
+  real(kind=dp), parameter :: SECT_DIAM_MAX = 10d-6
 
   character(len=PMC_MAX_FILENAME_LEN) :: in_filename, out_filename
   type(bin_grid_t) :: diam_grid, o_c_grid, frac_grid, sc_grid, kappa_grid, &
@@ -65,18 +87,26 @@ program process
        dry_masses(:), sec_masses(:), sec_fracs(:), org_carbon_masses(:), &
        o_cs(:), spec_mass_concs(:), group_mass_concs(:), num_dist(:), &
        diam_o_c_dist(:,:), diam_sec_frac_dist(:,:), org_masses(:), &
-       salt_masses(:), srhs(:), scs(:), scs_est(:), kappas(:), &
+       srhs(:), scs(:), scs_est(:), kappas(:), &
        diam_srh_dist(:,:), diam_sc_dist(:,:), diam_sc_est_dist(:,:), &
        diam_kappa_dist(:,:)
   logical, allocatable :: is_mixed(:), is_separated(:)
   real(kind=dp) :: tot_org_part_mass_conc
-  integer :: i_salt, i_ss
+  integer :: i_ss
+  type(aero_state_t) :: mixed_aero_state
+  integer :: i_mix
+  real(kind=dp) :: srh_intmix, tot_org_mix_mass_conc
+  real(kind=dp), allocatable :: mix_org_masses(:), mix_srhs(:), &
+       mix_kappas(:), mix_scs(:), mix_scs_est(:)
+  logical, allocatable :: mix_is_mixed(:), mix_is_separated(:)
   type(stats_1d_t) :: stats_num_dist, stats_tot_num_conc, &
        stats_tot_dry_mass_conc, stats_tot_org_mass_conc, &
        stats_tot_sec_org_mass_conc, stats_tot_o_c, stats_tot_om_oc, &
        stats_sec_o_c, stats_group_mass_conc(N_GROUP), stats_rel_humid, &
        stats_mixed_num_frac, stats_llps_num_frac, stats_llps_org_frac, &
-       stats_ccn_conc(N_SS), stats_ccn_est_conc(N_SS)
+       stats_ccn_conc(N_SS), stats_ccn_est_conc(N_SS), stats_srh_intmix, &
+       stats_mix_llps_num_frac(N_MIX), stats_mix_llps_org_frac(N_MIX), &
+       stats_mix_ccn_conc(N_SS, N_MIX), stats_mix_ccn_est_conc(N_SS, N_MIX)
   type(stats_2d_t) :: stats_diam_o_c_dist, stats_diam_sec_frac_dist, &
        stats_diam_srh_dist, stats_diam_sc_dist, stats_diam_sc_est_dist, &
        stats_diam_kappa_dist
@@ -243,45 +273,10 @@ program process
              dry_diameters, frac_grid, sec_fracs, num_concs)
         call stats_2d_add(stats_diam_sec_frac_dist, diam_sec_frac_dist)
 
-        ! liquid-liquid phase separation, diagnosed as in CMAQ (Pye et al.,
-        ! 2017, Eq. 7): the separation relative humidity of a particle
-        ! follows from the OM/OC of its organic matter,
-        ! SRH = 1 / (1 + exp(7.7 OM/OC - 15.8)), the relation that Pye et
-        ! al. derived from the experiments with ammonium sulfate of You et
-        ! al. (2013); a particle that contains organic matter and inorganic
-        ! salt separates into an organic-rich and an inorganic-rich phase
-        ! when the relative humidity is below its SRH
-        org_masses = aero_state_organic_masses(aero_state, aero_data)
-        if (allocated(salt_masses)) deallocate(salt_masses)
-        if (allocated(srhs)) deallocate(srhs)
-        if (allocated(kappas)) deallocate(kappas)
-        if (allocated(is_mixed)) deallocate(is_mixed)
-        if (allocated(is_separated)) deallocate(is_separated)
-        allocate(salt_masses(aero_state_n_part(aero_state)), &
-             srhs(aero_state_n_part(aero_state)), &
-             kappas(aero_state_n_part(aero_state)), &
-             is_mixed(aero_state_n_part(aero_state)), &
-             is_separated(aero_state_n_part(aero_state)))
-        salt_masses = 0d0
-        do i_salt = 1,size(SALT_SPEC)
-           i_spec = aero_data_spec_by_name(aero_data, SALT_SPEC(i_salt))
-           if (i_spec == 0) cycle
-           salt_masses = salt_masses + aero_particle_species_mass( &
-                aero_state%apa%particle(1:aero_state_n_part(aero_state)), &
-                i_spec, aero_data)
-        end do
-        do i_part = 1,aero_state_n_part(aero_state)
-           is_mixed(i_part) = (org_carbon_masses(i_part) > 0d0) &
-                .and. (salt_masses(i_part) > 0d0)
-           if (is_mixed(i_part)) then
-              srhs(i_part) = 1d0 / (1d0 + exp(7.7d0 * org_masses(i_part) &
-                   / org_carbon_masses(i_part) - 15.8d0))
-           else
-              srhs(i_part) = 0d0
-           end if
-           is_separated(i_part) = is_mixed(i_part) &
-                .and. (env_state%rel_humid < srhs(i_part))
-        end do
+        ! liquid-liquid phase separation and critical supersaturation of
+        ! every particle (see llps_ccn below)
+        call llps_ccn(aero_state, aero_data, env_state, org_masses, &
+             is_mixed, srhs, is_separated, kappas, scs, scs_est)
         call stats_1d_add_entry(stats_rel_humid, env_state%rel_humid, &
              i_index)
         if (tot_num_conc > 0d0) then
@@ -305,24 +300,6 @@ program process
              srh_grid, srhs, merge(num_concs, 0d0, is_mixed))
         call stats_2d_add(stats_diam_srh_dist, diam_srh_dist)
 
-        ! critical supersaturation of every particle by kappa-Koehler
-        ! theory, with the solute kappa of the dry particle (the volume
-        ! average over the species; for the organic species 0.11 OM:OC
-        ! - 0.10 as in CMAQ), once with the surface tension of water and
-        ! once with the effective surface tension of an organic film
-        ! (aero_particle_crit_rel_humid_est). For particles without
-        ! soluble material the effective surface tension is not defined
-        ! (that function then returns a critical relative humidity of 1),
-        ! so they keep the value with the surface tension of water
-        scs = aero_state_crit_rel_humids(aero_state, aero_data, env_state) &
-             - 1d0
-        scs_est = aero_state_crit_rel_humids_est(aero_state, aero_data, &
-             env_state) - 1d0
-        do i_part = 1,aero_state_n_part(aero_state)
-           kappas(i_part) = aero_particle_solute_kappa( &
-                aero_state%apa%particle(i_part), aero_data)
-           if (kappas(i_part) < 1d-30) scs_est(i_part) = scs(i_part)
-        end do
         do i_ss = 1,N_SS
            call stats_1d_add_entry(stats_ccn_conc(i_ss), &
                 sum(num_concs, mask=(scs <= CCN_SS(i_ss) / 100d0)), i_index)
@@ -339,6 +316,56 @@ program process
         diam_kappa_dist = bin_grid_histogram_2d(diam_grid, dry_diameters, &
              kappa_grid, kappas, num_concs)
         call stats_2d_add(stats_diam_kappa_dist, diam_kappa_dist)
+
+        ! the same for the two internal mixtures of these particles (see
+        ! make_internal_mixture below), with the number concentrations of
+        ! the particles, which the mixing does not change. srh_intmix is
+        ! the separation relative humidity of the mixture of all
+        ! particles: that of the OM/OC of all organic matter
+        if (carbon_conc > 0d0) then
+           srh_intmix = 1d0 / (1d0 + exp(7.7d0 * org_mass_conc &
+                / carbon_conc - 15.8d0))
+        else
+           srh_intmix = 0d0
+        end if
+        call stats_1d_add_entry(stats_srh_intmix, srh_intmix, i_index)
+        do i_mix = 1,N_MIX
+           call make_internal_mixture(aero_state, aero_data, &
+                MIX_SECTIONAL(i_mix), mixed_aero_state)
+           call llps_ccn(mixed_aero_state, aero_data, env_state, &
+                mix_org_masses, mix_is_mixed, mix_srhs, mix_is_separated, &
+                mix_kappas, mix_scs, mix_scs_est)
+           if (.not. MIX_SECTIONAL(i_mix)) then
+              call assert_msg(537120864, all((.not. mix_is_mixed) &
+                   .or. (abs(mix_srhs - srh_intmix) < 1d-9)), &
+                   "particles of the internal mixture differ in SRH")
+           end if
+           if (tot_num_conc > 0d0) then
+              call stats_1d_add_entry(stats_mix_llps_num_frac(i_mix), &
+                   sum(num_concs, mask=mix_is_separated) / tot_num_conc, &
+                   i_index)
+           else
+              call stats_1d_add_entry(stats_mix_llps_num_frac(i_mix), 0d0, &
+                   i_index)
+           end if
+           tot_org_mix_mass_conc = sum(mix_org_masses * num_concs)
+           if (tot_org_mix_mass_conc > 0d0) then
+              call stats_1d_add_entry(stats_mix_llps_org_frac(i_mix), &
+                   sum(mix_org_masses * num_concs, mask=mix_is_separated) &
+                   / tot_org_mix_mass_conc, i_index)
+           else
+              call stats_1d_add_entry(stats_mix_llps_org_frac(i_mix), 0d0, &
+                   i_index)
+           end if
+           do i_ss = 1,N_SS
+              call stats_1d_add_entry(stats_mix_ccn_conc(i_ss, i_mix), &
+                   sum(num_concs, mask=(mix_scs <= CCN_SS(i_ss) / 100d0)), &
+                   i_index)
+              call stats_1d_add_entry(stats_mix_ccn_est_conc(i_ss, i_mix), &
+                   sum(num_concs, &
+                   mask=(mix_scs_est <= CCN_SS(i_ss) / 100d0)), i_index)
+           end do
+        end do
 
      end do
 
@@ -426,8 +453,222 @@ program process
           "ccn_est_conc_" // CCN_SS_NAME(i_ss), dim_name="time", &
           unit="m^{-3}")
   end do
+  call stats_1d_output_netcdf(stats_srh_intmix, ncid, "srh_intmix", &
+       dim_name="time", unit="1")
+  do i_mix = 1,N_MIX
+     call stats_1d_output_netcdf(stats_mix_llps_num_frac(i_mix), ncid, &
+          "llps_num_frac_" // trim(MIX_NAME(i_mix)), dim_name="time", &
+          unit="1")
+     call stats_1d_output_netcdf(stats_mix_llps_org_frac(i_mix), ncid, &
+          "llps_org_mass_frac_" // trim(MIX_NAME(i_mix)), &
+          dim_name="time", unit="1")
+     do i_ss = 1,N_SS
+        call stats_1d_output_netcdf(stats_mix_ccn_conc(i_ss, i_mix), ncid, &
+             "ccn_conc_" // trim(MIX_NAME(i_mix)) // "_" &
+             // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
+        call stats_1d_output_netcdf(stats_mix_ccn_est_conc(i_ss, i_mix), &
+             ncid, "ccn_est_conc_" // trim(MIX_NAME(i_mix)) // "_" &
+             // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
+     end do
+  end do
   call pmc_nc_close(ncid)
 
   call pmc_mpi_finalize()
+
+contains
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Liquid-liquid phase separation and critical supersaturation of
+  !> every particle of an aerosol state.
+  !!
+  !! The phase separation is diagnosed as in CMAQ (Pye et al., 2017,
+  !! Eq. 7): the separation relative humidity of a particle follows from
+  !! the OM/OC of its organic matter, SRH = 1 / (1 + exp(7.7 OM/OC -
+  !! 15.8)), the relation that Pye et al. derived from the experiments
+  !! with ammonium sulfate of You et al. (2013); a particle that contains
+  !! organic matter and inorganic salt separates into an organic-rich and
+  !! an inorganic-rich phase when the relative humidity is below its SRH.
+  !!
+  !! The critical supersaturation follows from kappa-Koehler theory, with
+  !! the solute kappa of the dry particle (the volume average over the
+  !! species; for the organic species 0.11 OM:OC - 0.10 as in CMAQ), once
+  !! with the surface tension of water and once with the effective
+  !! surface tension of an organic film
+  !! (aero_particle_crit_rel_humid_est). For particles without soluble
+  !! material the effective surface tension is not defined (that function
+  !! then returns a critical relative humidity of 1), so they keep the
+  !! value with the surface tension of water.
+  subroutine llps_ccn(aero_state, aero_data, env_state, org_masses, &
+       is_mixed, srhs, is_separated, kappas, scs, scs_est)
+
+    !> Aerosol state.
+    type(aero_state_t), intent(in) :: aero_state
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+    !> Environment state.
+    type(env_state_t), intent(in) :: env_state
+    !> Mass of the organic matter of each particle (kg).
+    real(kind=dp), allocatable, intent(inout) :: org_masses(:)
+    !> Whether each particle contains organic matter and inorganic salt.
+    logical, allocatable, intent(inout) :: is_mixed(:)
+    !> Separation relative humidity of each particle (1), 0 for the
+    !> particles without organic matter or salt.
+    real(kind=dp), allocatable, intent(inout) :: srhs(:)
+    !> Whether each particle is separated into two liquid phases.
+    logical, allocatable, intent(inout) :: is_separated(:)
+    !> Solute kappa of each particle (1).
+    real(kind=dp), allocatable, intent(inout) :: kappas(:)
+    !> Critical supersaturation of each particle with the surface tension
+    !> of water (1).
+    real(kind=dp), allocatable, intent(inout) :: scs(:)
+    !> Critical supersaturation of each particle with the effective
+    !> surface tension (1).
+    real(kind=dp), allocatable, intent(inout) :: scs_est(:)
+
+    integer :: n_part, i_part, i_salt, i_spec
+    real(kind=dp), allocatable :: org_carbon_masses(:), salt_masses(:)
+
+    n_part = aero_state_n_part(aero_state)
+    org_masses = aero_state_organic_masses(aero_state, aero_data)
+    org_carbon_masses = aero_state_organic_carbon_masses(aero_state, &
+         aero_data)
+    allocate(salt_masses(n_part))
+    salt_masses = 0d0
+    do i_salt = 1,size(SALT_SPEC)
+       i_spec = aero_data_spec_by_name(aero_data, SALT_SPEC(i_salt))
+       if (i_spec == 0) cycle
+       salt_masses = salt_masses + aero_particle_species_mass( &
+            aero_state%apa%particle(1:n_part), i_spec, aero_data)
+    end do
+    if (allocated(srhs)) deallocate(srhs)
+    if (allocated(kappas)) deallocate(kappas)
+    if (allocated(is_mixed)) deallocate(is_mixed)
+    if (allocated(is_separated)) deallocate(is_separated)
+    allocate(srhs(n_part), kappas(n_part), is_mixed(n_part), &
+         is_separated(n_part))
+    do i_part = 1,n_part
+       is_mixed(i_part) = (org_carbon_masses(i_part) > 0d0) &
+            .and. (salt_masses(i_part) > 0d0)
+       if (is_mixed(i_part)) then
+          srhs(i_part) = 1d0 / (1d0 + exp(7.7d0 * org_masses(i_part) &
+               / org_carbon_masses(i_part) - 15.8d0))
+       else
+          srhs(i_part) = 0d0
+       end if
+       is_separated(i_part) = is_mixed(i_part) &
+            .and. (env_state%rel_humid < srhs(i_part))
+    end do
+
+    scs = aero_state_crit_rel_humids(aero_state, aero_data, env_state) &
+         - 1d0
+    scs_est = aero_state_crit_rel_humids_est(aero_state, aero_data, &
+         env_state) - 1d0
+    do i_part = 1,n_part
+       kappas(i_part) = aero_particle_solute_kappa( &
+            aero_state%apa%particle(i_part), aero_data)
+       if (kappas(i_part) < 1d-30) scs_est(i_part) = scs(i_part)
+    end do
+
+  end subroutine llps_ccn
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Internal mixture of the particles of an aerosol state.
+  !!
+  !! The dry species of every particle are replaced by the average dry
+  !! composition of all particles or, if \c sectional, of the particles
+  !! in its size section (the volume fractions of the dry species,
+  !! weighted by the number concentrations of the particles), scaled to
+  !! the dry volume of the particle; its water is kept. So the dry
+  !! diameter and the total volume of every particle (and with it its
+  !! number concentration) and the total concentration of every species
+  !! are those of the original particles, and only the composition is
+  !! averaged.
+  subroutine make_internal_mixture(aero_state, aero_data, sectional, &
+       mixed_aero_state)
+
+    !> Aerosol state.
+    type(aero_state_t), intent(in) :: aero_state
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+    !> Whether to mix the particles of each size section separately.
+    logical, intent(in) :: sectional
+    !> Internal mixture of the particles of \c aero_state.
+    type(aero_state_t), intent(inout) :: mixed_aero_state
+
+    integer :: n_part, i_part, i_sect
+    integer, allocatable :: part_sects(:)
+    real(kind=dp) :: dry_diam, sect_vol
+    real(kind=dp), allocatable :: num_concs(:), mix_num_concs(:), vols(:), &
+         sect_fracs(:,:), spec_concs(:), mix_spec_concs(:)
+
+    n_part = aero_state_n_part(aero_state)
+    mixed_aero_state = aero_state
+    num_concs = aero_state_num_concs(aero_state, aero_data)
+
+    ! number-weighted dry species volumes of each section, then their
+    ! fractions
+    allocate(part_sects(n_part), &
+         sect_fracs(aero_data_n_spec(aero_data), N_SECT))
+    sect_fracs = 0d0
+    do i_part = 1,n_part
+       i_sect = 1
+       if (sectional) then
+          dry_diam = aero_particle_dry_diameter( &
+               aero_state%apa%particle(i_part), aero_data)
+          i_sect = floor(real(N_SECT, kind=dp) &
+               * log(dry_diam / SECT_DIAM_MIN) &
+               / log(SECT_DIAM_MAX / SECT_DIAM_MIN)) + 1
+          i_sect = max(1, min(N_SECT, i_sect))
+       end if
+       part_sects(i_part) = i_sect
+       vols = aero_state%apa%particle(i_part)%vol
+       if (aero_data%i_water > 0) vols(aero_data%i_water) = 0d0
+       sect_fracs(:, i_sect) = sect_fracs(:, i_sect) &
+            + num_concs(i_part) * vols
+    end do
+    do i_sect = 1,N_SECT
+       sect_vol = sum(sect_fracs(:, i_sect))
+       if (sect_vol > 0d0) then
+          sect_fracs(:, i_sect) = sect_fracs(:, i_sect) / sect_vol
+       end if
+    end do
+
+    do i_part = 1,n_part
+       vols = sect_fracs(:, part_sects(i_part)) &
+            * aero_particle_dry_volume(aero_state%apa%particle(i_part), &
+            aero_data)
+       if (aero_data%i_water > 0) then
+          vols(aero_data%i_water) &
+               = aero_state%apa%particle(i_part)%vol(aero_data%i_water)
+       end if
+       call aero_particle_set_vols(mixed_aero_state%apa%particle(i_part), &
+            vols)
+    end do
+
+    ! the number concentrations and the total concentration of every
+    ! species must not change
+    mix_num_concs = aero_state_num_concs(mixed_aero_state, aero_data)
+    call assert_msg(270554861, &
+         all(abs(mix_num_concs - num_concs) <= 1d-10 * num_concs), &
+         "internal mixing changed number concentrations")
+    allocate(spec_concs(aero_data_n_spec(aero_data)), &
+         mix_spec_concs(aero_data_n_spec(aero_data)))
+    spec_concs = 0d0
+    mix_spec_concs = 0d0
+    do i_part = 1,n_part
+       spec_concs = spec_concs + num_concs(i_part) &
+            * aero_state%apa%particle(i_part)%vol
+       mix_spec_concs = mix_spec_concs + num_concs(i_part) &
+            * mixed_aero_state%apa%particle(i_part)%vol
+    end do
+    call assert_msg(841663752, &
+         all(abs(mix_spec_concs - spec_concs) <= 1d-9 * spec_concs), &
+         "internal mixing changed species concentrations")
+
+  end subroutine make_internal_mixture
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 end program process
