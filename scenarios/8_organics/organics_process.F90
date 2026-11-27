@@ -14,11 +14,15 @@
 !> supersaturation of every particle (kappa-Koehler theory with the
 !> surface tension of water and with the effective surface tension of
 !> the organic film) with the CCN concentrations at fixed
-!> supersaturations. The phase separation and the CCN concentrations are
-!> also computed for two internal mixtures of the same particles, to
-!> show what the per-particle composition changes: every particle with
-!> the average dry composition of all particles, and every particle with
-!> the average dry composition of the particles in its size section.
+!> supersaturations; between these two limits, the CCN concentrations
+!> with the film only on the particles whose organic matter has an O:C
+!> up to a limit, for three such limits from laboratory studies of the
+!> phase separation near saturation. The phase separation and the CCN
+!> concentrations are also computed for two internal mixtures of the
+!> same particles, to show what the per-particle composition changes:
+!> every particle with the average dry composition of all particles, and
+!> every particle with the average dry composition of the particles in
+!> its size section.
 !> The number and mass concentrations, the O:C, the phase separation and
 !> the CCN concentrations are also computed for the particles of each
 !> class by origin: the urban primary particles, the urban and regional
@@ -52,6 +56,23 @@ program process
   !> Names of the supersaturations in the output variables.
   character(len=4), parameter :: CCN_SS_NAME(N_SS) = [ &
        character(len=4) :: "s010", "s020", "s030", "s050", "s100"]
+  !> Number of limits of the O:C for the organic film at activation.
+  integer, parameter :: N_FILM = 3
+  !> Limits of the O:C of the organic matter of a particle (1): up to
+  !> the limit, the organic matter is taken to stay in a phase of its
+  !> own until the particle activates, so that the particle keeps its
+  !> organic film (see llps_ccn below). These are the O:C up to which
+  !> two liquid phases were observed at relative humidities of 95 to
+  !> 100% or at supersaturation: 0.44 in secondary organic material
+  !> without salts and in particles of one organic compound
+  !> (Renbaum-Wolff et al., 2016; Song et al., 2017, 2018, 2020; Ham et
+  !> al., 2019), 0.67 as the average of particles of two organic
+  !> compounds (Song et al., 2020), and 0.75 as the average of the
+  !> organic matter mixed with ammonium sulfate (Malek et al., 2023).
+  real(kind=dp), parameter :: FILM_O_C(N_FILM) = [0.44d0, 0.67d0, 0.75d0]
+  !> Names of the limits in the output variables.
+  character(len=5), parameter :: FILM_NAME(N_FILM) = [ &
+       character(len=5) :: "oc044", "oc067", "oc075"]
   !> Inorganic species that form the salt for the phase separation
   !> (those missing from the aerosol data are skipped).
   character(len=AERO_NAME_LEN), parameter :: SALT_SPEC(5) = [ &
@@ -108,16 +129,18 @@ program process
        diam_o_c_dist(:,:), diam_sec_frac_dist(:,:), org_masses(:), &
        srhs(:), scs(:), scs_est(:), kappas(:), &
        diam_srh_dist(:,:), diam_sc_dist(:,:), diam_sc_est_dist(:,:), &
-       diam_kappa_dist(:,:), entry_times(:), entry_srh_dist(:,:)
-  logical, allocatable :: is_mixed(:), is_separated(:)
+       diam_kappa_dist(:,:), entry_times(:), entry_srh_dist(:,:), &
+       scs_film(:,:)
+  logical, allocatable :: is_mixed(:), is_separated(:), has_film(:,:)
   real(kind=dp) :: tot_org_part_mass_conc
-  integer :: i_ss
+  integer :: i_ss, i_film
   type(aero_state_t) :: mixed_aero_state
   integer :: i_mix
   real(kind=dp) :: srh_intmix, tot_org_mix_mass_conc
   real(kind=dp), allocatable :: mix_org_masses(:), mix_srhs(:), &
-       mix_kappas(:), mix_scs(:), mix_scs_est(:)
-  logical, allocatable :: mix_is_mixed(:), mix_is_separated(:)
+       mix_kappas(:), mix_scs(:), mix_scs_est(:), mix_scs_film(:,:)
+  logical, allocatable :: mix_is_mixed(:), mix_is_separated(:), &
+       mix_has_film(:,:)
   integer :: i_origin
   integer, allocatable :: origins(:)
   logical, allocatable :: in_origin(:), is_dry(:), is_salt(:)
@@ -131,6 +154,7 @@ program process
        stats_origin_llps_org_mass_conc(N_ORIGIN), &
        stats_origin_ccn_conc(N_SS, N_ORIGIN), &
        stats_origin_ccn_est_conc(N_SS, N_ORIGIN), &
+       stats_origin_ccn_film_conc(N_SS, N_FILM, N_ORIGIN), &
        stats_origin_dry_mass_conc(N_ORIGIN), &
        stats_origin_salt_mass_conc(N_ORIGIN), &
        stats_origin_org_mass_conc(N_ORIGIN), &
@@ -143,7 +167,9 @@ program process
        stats_mixed_num_frac, stats_llps_num_frac, stats_llps_org_frac, &
        stats_ccn_conc(N_SS), stats_ccn_est_conc(N_SS), stats_srh_intmix, &
        stats_mix_llps_num_frac(N_MIX), stats_mix_llps_org_frac(N_MIX), &
-       stats_mix_ccn_conc(N_SS, N_MIX), stats_mix_ccn_est_conc(N_SS, N_MIX)
+       stats_mix_ccn_conc(N_SS, N_MIX), stats_mix_ccn_est_conc(N_SS, N_MIX), &
+       stats_film_num_frac(N_FILM), stats_ccn_film_conc(N_SS, N_FILM), &
+       stats_mix_ccn_film_conc(N_SS, N_FILM, N_MIX)
   type(stats_2d_t) :: stats_diam_o_c_dist, stats_diam_sec_frac_dist, &
        stats_diam_srh_dist, stats_diam_sc_dist, stats_diam_sc_est_dist, &
        stats_diam_kappa_dist, stats_entry_srh_dist
@@ -318,7 +344,8 @@ program process
         ! liquid-liquid phase separation and critical supersaturation of
         ! every particle (see llps_ccn below)
         call llps_ccn(aero_state, aero_data, env_state, org_masses, &
-             is_mixed, srhs, is_separated, kappas, scs, scs_est)
+             is_mixed, srhs, is_separated, kappas, scs, scs_est, has_film, &
+             scs_film)
         call stats_1d_add_entry(stats_rel_humid, env_state%rel_humid, &
              i_index)
         if (tot_num_conc > 0d0) then
@@ -362,6 +389,24 @@ program process
                 sum(num_concs, mask=(scs_est <= CCN_SS(i_ss) / 100d0)), &
                 i_index)
         end do
+        ! with the organic film only on the particles whose organic matter
+        ! has an O:C up to each limit, and the number fraction of these
+        ! particles
+        do i_film = 1,N_FILM
+           if (tot_num_conc > 0d0) then
+              call stats_1d_add_entry(stats_film_num_frac(i_film), &
+                   sum(num_concs, mask=has_film(:, i_film)) / tot_num_conc, &
+                   i_index)
+           else
+              call stats_1d_add_entry(stats_film_num_frac(i_film), 0d0, &
+                   i_index)
+           end if
+           do i_ss = 1,N_SS
+              call stats_1d_add_entry(stats_ccn_film_conc(i_ss, i_film), &
+                   sum(num_concs, mask=(scs_film(:, i_film) &
+                   <= CCN_SS(i_ss) / 100d0)), i_index)
+           end do
+        end do
         diam_sc_dist = bin_grid_histogram_2d(diam_grid, dry_diameters, &
              sc_grid, scs, num_concs)
         call stats_2d_add(stats_diam_sc_dist, diam_sc_dist)
@@ -389,7 +434,7 @@ program process
                 MIX_SECTIONAL(i_mix), mixed_aero_state)
            call llps_ccn(mixed_aero_state, aero_data, env_state, &
                 mix_org_masses, mix_is_mixed, mix_srhs, mix_is_separated, &
-                mix_kappas, mix_scs, mix_scs_est)
+                mix_kappas, mix_scs, mix_scs_est, mix_has_film, mix_scs_film)
            if (.not. MIX_SECTIONAL(i_mix)) then
               call assert_msg(537120864, all((.not. mix_is_mixed) &
                    .or. (abs(mix_srhs - srh_intmix) < 1d-9)), &
@@ -419,6 +464,12 @@ program process
               call stats_1d_add_entry(stats_mix_ccn_est_conc(i_ss, i_mix), &
                    sum(num_concs, &
                    mask=(mix_scs_est <= CCN_SS(i_ss) / 100d0)), i_index)
+              do i_film = 1,N_FILM
+                 call stats_1d_add_entry( &
+                      stats_mix_ccn_film_conc(i_ss, i_film, i_mix), &
+                      sum(num_concs, mask=(mix_scs_film(:, i_film) &
+                      <= CCN_SS(i_ss) / 100d0)), i_index)
+              end do
            end do
         end do
 
@@ -479,6 +530,13 @@ program process
                    stats_origin_ccn_est_conc(i_ss, i_origin), &
                    sum(num_concs, mask=(in_origin &
                    .and. (scs_est <= CCN_SS(i_ss) / 100d0))), i_index)
+              do i_film = 1,N_FILM
+                 call stats_1d_add_entry( &
+                      stats_origin_ccn_film_conc(i_ss, i_film, i_origin), &
+                      sum(num_concs, mask=(in_origin &
+                      .and. (scs_film(:, i_film) <= CCN_SS(i_ss) / 100d0))), &
+                      i_index)
+              end do
            end do
            call stats_1d_add_entry(stats_origin_dry_mass_conc(i_origin), &
                 sum(origin_spec_mass_concs(:, i_origin), mask=is_dry), &
@@ -612,6 +670,15 @@ program process
           "ccn_est_conc_" // CCN_SS_NAME(i_ss), dim_name="time", &
           unit="m^{-3}")
   end do
+  do i_film = 1,N_FILM
+     call stats_1d_output_netcdf(stats_film_num_frac(i_film), ncid, &
+          "film_num_frac_" // FILM_NAME(i_film), dim_name="time", unit="1")
+     do i_ss = 1,N_SS
+        call stats_1d_output_netcdf(stats_ccn_film_conc(i_ss, i_film), &
+             ncid, "ccn_film_conc_" // FILM_NAME(i_film) // "_" &
+             // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
+     end do
+  end do
   call stats_1d_output_netcdf(stats_srh_intmix, ncid, "srh_intmix", &
        dim_name="time", unit="1")
   do i_mix = 1,N_MIX
@@ -628,6 +695,13 @@ program process
         call stats_1d_output_netcdf(stats_mix_ccn_est_conc(i_ss, i_mix), &
              ncid, "ccn_est_conc_" // trim(MIX_NAME(i_mix)) // "_" &
              // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
+        do i_film = 1,N_FILM
+           call stats_1d_output_netcdf( &
+                stats_mix_ccn_film_conc(i_ss, i_film, i_mix), ncid, &
+                "ccn_film_conc_" // trim(MIX_NAME(i_mix)) // "_" &
+                // FILM_NAME(i_film) // "_" // CCN_SS_NAME(i_ss), &
+                dim_name="time", unit="m^{-3}")
+        end do
      end do
   end do
   do i_origin = 1,N_ORIGIN
@@ -651,6 +725,13 @@ program process
              stats_origin_ccn_est_conc(i_ss, i_origin), ncid, &
              "ccn_est_conc_" // trim(ORIGIN_NAME(i_origin)) // "_" &
              // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
+        do i_film = 1,N_FILM
+           call stats_1d_output_netcdf( &
+                stats_origin_ccn_film_conc(i_ss, i_film, i_origin), ncid, &
+                "ccn_film_conc_" // trim(ORIGIN_NAME(i_origin)) // "_" &
+                // FILM_NAME(i_film) // "_" // CCN_SS_NAME(i_ss), &
+                dim_name="time", unit="m^{-3}")
+        end do
      end do
      call stats_1d_output_netcdf(stats_origin_dry_mass_conc(i_origin), &
           ncid, "dry_mass_conc_" // trim(ORIGIN_NAME(i_origin)), &
@@ -702,8 +783,28 @@ contains
   !! material the effective surface tension is not defined (that function
   !! then returns a critical relative humidity of 1), so they keep the
   !! value with the surface tension of water.
+  !!
+  !! These two critical supersaturations are limits: no particle and
+  !! every particle carries the organic film until it activates. The
+  !! film is that of the models with complete phase separation of Davies
+  !! et al. (2019, after Ovadnevaite et al., 2017), in which the organic
+  !! matter stays apart from the aqueous phase whatever its composition;
+  !! in their equilibrium model the film is gone once the organic matter
+  !! mixes with the aqueous phase. The separation relative humidity
+  !! above does not tell which particles keep the film, because it is
+  !! below 1 for every OM/OC and the particles activate above 1. Here
+  !! the particles keep the film whose organic matter has an O:C (the
+  !! average of the particle, weighted by carbon) of at most a limit;
+  !! the others take the value with the surface tension of water. This
+  !! is done for each limit of FILM_O_C: O:C up to which two liquid
+  !! phases were observed near saturation or at supersaturation, in
+  !! secondary organic material without salts (Renbaum-Wolff et al.,
+  !! 2016; Song et al., 2017; Ham et al., 2019), in particles of one or
+  !! two organic compounds (Song et al., 2018, 2020) and in mixtures
+  !! with ammonium sulfate (Malek et al., 2023).
   subroutine llps_ccn(aero_state, aero_data, env_state, org_masses, &
-       is_mixed, srhs, is_separated, kappas, scs, scs_est)
+       is_mixed, srhs, is_separated, kappas, scs, scs_est, has_film, &
+       scs_film)
 
     !> Aerosol state.
     type(aero_state_t), intent(in) :: aero_state
@@ -728,9 +829,17 @@ contains
     !> Critical supersaturation of each particle with the effective
     !> surface tension (1).
     real(kind=dp), allocatable, intent(inout) :: scs_est(:)
+    !> Whether each particle keeps the organic film until it activates,
+    !> for each limit of FILM_O_C (particle, limit).
+    logical, allocatable, intent(inout) :: has_film(:,:)
+    !> Critical supersaturation of each particle with the effective
+    !> surface tension if it keeps the film and with the surface tension
+    !> of water if not, for each limit of FILM_O_C (particle, limit) (1).
+    real(kind=dp), allocatable, intent(inout) :: scs_film(:,:)
 
-    integer :: n_part, i_part, i_salt, i_spec
-    real(kind=dp), allocatable :: org_carbon_masses(:), salt_masses(:)
+    integer :: n_part, i_part, i_salt, i_spec, i_film
+    real(kind=dp), allocatable :: org_carbon_masses(:), salt_masses(:), &
+         o_cs(:)
 
     n_part = aero_state_n_part(aero_state)
     org_masses = aero_state_organic_masses(aero_state, aero_data)
@@ -771,6 +880,16 @@ contains
        kappas(i_part) = aero_particle_solute_kappa( &
             aero_state%apa%particle(i_part), aero_data)
        if (kappas(i_part) < 1d-30) scs_est(i_part) = scs(i_part)
+    end do
+
+    o_cs = aero_state_o_c(aero_state, aero_data)
+    if (allocated(has_film)) deallocate(has_film)
+    if (allocated(scs_film)) deallocate(scs_film)
+    allocate(has_film(n_part, N_FILM), scs_film(n_part, N_FILM))
+    do i_film = 1,N_FILM
+       has_film(:, i_film) = (org_carbon_masses > 0d0) &
+            .and. (o_cs <= FILM_O_C(i_film))
+       scs_film(:, i_film) = merge(scs_est, scs, has_film(:, i_film))
     end do
 
   end subroutine llps_ccn
