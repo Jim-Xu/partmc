@@ -923,6 +923,7 @@ contains
           if (removal_action /= AERO_INFO_NONE) then
              aero_info%id = aero_state_from%apa%particle(i_part)%id
              aero_info%action = removal_action
+             aero_info%other_id = 0
              call aero_state_remove_particle_with_info(aero_state_from, &
                   i_part, aero_info)
           else
@@ -975,6 +976,7 @@ contains
        if (removal_action /= AERO_INFO_NONE) then
           aero_info%id = aero_state_from%apa%particle(i_part)%id
           aero_info%action = removal_action
+          aero_info%other_id = 0
           call aero_state_remove_particle_with_info(aero_state_from, &
                i_part, aero_info)
        else
@@ -1881,6 +1883,7 @@ contains
           if (pmc_random() < 0.5d0) then
              aero_info%id = aero_state%apa%particle(i_part)%id
              aero_info%action = AERO_INFO_HALVED
+             aero_info%other_id = 0
 #ifdef PMC_USE_WRF
              record_removal = .false.
 #else
@@ -2010,6 +2013,7 @@ contains
                i_class)%entry(i_entry)
           aero_info%id = aero_state%apa%particle(i_part)%id
           aero_info%action = AERO_INFO_HALVED
+          aero_info%other_id = 0
 #ifdef PMC_USE_WRF
           record_removal = .false.
 #else
