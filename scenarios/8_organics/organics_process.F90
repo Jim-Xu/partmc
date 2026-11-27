@@ -828,8 +828,7 @@ contains
   !! with the surface tension of water and once with the effective
   !! surface tension of an organic film
   !! (aero_particle_crit_rel_humid_est). For particles without soluble
-  !! material the effective surface tension is not defined (that function
-  !! then returns a critical relative humidity of 1), so they keep the
+  !! material the film is not defined, and that function returns the
   !! value with the surface tension of water.
   !!
   !! These two critical supersaturations are limits: no particle and
@@ -932,7 +931,6 @@ contains
     do i_part = 1,n_part
        kappas(i_part) = aero_particle_solute_kappa( &
             aero_state%apa%particle(i_part), aero_data)
-       if (kappas(i_part) < 1d-30) scs_est(i_part) = scs(i_part)
     end do
 
     ! carbon mass and O:C of the film-forming organic matter of each

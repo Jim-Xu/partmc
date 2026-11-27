@@ -850,6 +850,13 @@ contains
          / (const%univ_gas_const * env_state%temp * const%water_density)
     dry_diam = aero_particle_dry_diameter(aero_particle, aero_data)
     kappa = aero_particle_solute_kappa(aero_particle, aero_data)
+    if (kappa < 1d-30) then
+       ! no soluble material: the film model does not apply (see
+       ! aero_particle_crit_diameter_est()), use the standard treatment
+       aero_particle_crit_rel_humid_est = aero_particle_crit_rel_humid( &
+            aero_particle, aero_data, env_state)
+       return
+    end if
     d = aero_particle_crit_diameter_est(aero_particle, aero_data, env_state, &
          eff_surf_eng)
 
@@ -1019,11 +1026,12 @@ contains
 
     if (kappa < 1d-30) then
        ! Hydrophobic particle: no soluble material, so there is no Köhler
-       ! activation barrier. Return the dry diameter; the effective surface
-       ! tension is undefined without a soluble core, so report it as zero
-       ! (the film model divides by a soluble volume that is zero at D_dry).
+       ! activation barrier. Return the dry diameter. The film model needs
+       ! an aqueous core (it divides by a soluble volume that is zero at
+       ! D_dry), so the particle is treated as in the standard routine
+       ! aero_particle_crit_diameter(), with the surface tension of water.
        aero_particle_crit_diameter_est = dry_diam
-       eff_surf_eng = 0d0
+       eff_surf_eng = const%water_surf_eng
        return
     end if
 
