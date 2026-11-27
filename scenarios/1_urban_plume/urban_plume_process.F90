@@ -48,14 +48,16 @@ program process
 
   allocate(times(n_index))
 
-  allocate(mixing_state_groups(3, 13)) ! 3 groups, max 13 species per group
+  allocate(mixing_state_groups(3, 9)) ! 3 groups, max 9 species per group
   mixing_state_groups = ""
   ! primary carbonaceous species
   mixing_state_groups(1,1:2) = [character(len=AERO_NAME_LEN) :: "OC", "BC"]
-  ! biogenic secondary organic species
+  ! biogenic secondary organic species: the SOA of the monoterpenes and
+  ! of isoprene (CRACMM3 has no separate species for the SOA of the
+  ! sesquiterpenes)
   mixing_state_groups(2,:) = [character(len=AERO_NAME_LEN) :: &
-       "AMT1", "AMT2", "AMT3", "AMT4", "AMT5", "AMT6", "AMTNO3", &
-       "AMTHYD", "AISO1", "AISO2", "AISO3", "ASQT", "AOLGB"]
+       "AHOM", "AELHOM", "ATRPN", "AHONIT", "AMTN1", &
+       "AISO3NOS", "AISO3OS", "AISO4", "AISO5"]
   ! secondary inorganic species
   mixing_state_groups(3,1:3) = [character(len=AERO_NAME_LEN) :: &
        "SO4", "NO3", "NH4"]
