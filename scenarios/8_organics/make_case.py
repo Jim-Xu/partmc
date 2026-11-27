@@ -294,12 +294,62 @@ DRYDEP_PARAMS = [("z_ref", 20.0), ("u_mean", None), ("z_rough", 1.15),
 # IPX (dihydroxy dihydroperoxides) and ROOH (the other hydroperoxides;
 # measured 0.8 to 4.1) like the hydroxy hydroperoxides, RCOOH like
 # formic acid, INALD (nitrooxy aldehydes) like the hydroxy nitrates, the
-# monoterpene nitrates VTRPN and VHONIT like the measured monoterpene
-# nitrooxy hydroperoxides 0.8
+# monoterpene nitrates VTRPN and VHONIT and the terpene hydroxy
+# hydroperoxides OPB like the measured monoterpene nitrooxy
+# hydroperoxides 0.8, and N2O5, which hydrolyses on wet surfaces, like
+# nitric acid
 GAS_VD_DAY = {"HNO3": 3.8, "H2O2": 5.2, "ISPX": 2.5, "ISHP": 2.5,
               "IEPOX": 2.5, "IPX": 2.5, "ROOH": 2.5, "HPLD": 2.4,
               "HCOOH": 1.0, "RCOOH": 1.0, "ONIT": 1.5, "ISON": 1.5,
-              "INALD": 1.5, "VTRPN": 0.8, "VHONIT": 0.8}
+              "INALD": 1.5, "VTRPN": 0.8, "VHONIT": 0.8, "OPB": 0.8,
+              "N2O5": 3.8}
+# the other gases that CMAQ deposits (GC and NR namelists of CRACMM3 in
+# CMAQ 6.0): daytime velocities (cm/s) of the parameterization of Zhang
+# et al. (2003) for its land use category 25 (mixed wood forests). Its
+# Table 4 gives the typical velocities of a dry summer day (friction
+# velocity 0.6 m/s, 20 C, RH 75%, solar radiation 600 W m^-2) for five
+# species,
+ZHANG_TYPICAL_DAY = {"SO2": 0.91, "HCHO": 1.08, "O3": 0.89, "PAN": 0.62,
+                     "HNO3": 2.84}
+# its Table 2 the maximum velocities over dry canopies for all 31
+# species (those needed here):
+ZHANG_MAX_DRY = {"SO2": 1.7, "NO2": 1.4, "O3": 1.5, "HNO3": 5.1,
+                 "HONO": 3.2, "HNO4": 4.7, "NH3": 2.2, "PAN": 1.0,
+                 "HCHO": 1.9, "MCHO": 0.5, "PALD": 0.5, "C4A": 0.4,
+                 "C7A": 0.4, "ACHO": 0.4, "MVK": 0.7, "MACR": 0.4,
+                 "MGLY": 0.7, "MOH": 1.6, "ETOH": 1.4, "CRES": 0.6,
+                 "ROOH": 1.5}
+# For the other species the paper suggests comparing their maxima with
+# those of the five species of Table 4 (Sect. 4.3). Here the typical
+# velocity is the maximum times the ratio of typical to maximum velocity
+# of the species whose pattern it follows (Sect. 4.2: NO2 and the organic
+# peroxides that of O3, NH3 that of SO2, HONO that of HNO3), otherwise
+# times the mean ratio of the five species (0.57; the five ratios are
+# 0.54 to 0.62).
+ZHANG_PATTERN = {"NO2": "O3", "ROOH": "O3", "NH3": "SO2", "HONO": "HNO3"}
+# Species of the case and their counterparts in Zhang et al. (2003):
+# ALD2 (acetaldehyde and higher aldehydes) as acetaldehyde, AONE
+# (acetone) as the C3 carbonyls, ISOPRD (the lumped first products of
+# isoprene) as the mean of methyl vinyl ketone and methacrolein, CH3OOH
+# and ETHOOH as the organic peroxides, OPEN (unsaturated dicarbonyls
+# from aromatics) and FURANONE as the C4-C5 carbonyls, PINAL and LIMAL
+# (C10 keto aldehydes) as the largest carbonyls (C6-C8), BALD as the
+# aromatic carbonyls, PHEN and CSL as cresol.
+ZHANG_SPECIES = {"O3": ["O3"], "SO2": ["SO2"], "NO2": ["NO2"],
+                 "NH3": ["NH3"], "HONO": ["HONO"], "HNO4": ["HNO4"],
+                 "PAN": ["PAN"], "HCHO": ["HCHO"], "ALD2": ["MCHO"],
+                 "AONE": ["PALD"], "MGLY": ["MGLY"],
+                 "ISOPRD": ["MVK", "MACR"], "CH3OH": ["MOH"],
+                 "ANOL": ["ETOH"], "CH3OOH": ["ROOH"], "ETHOOH": ["ROOH"],
+                 "CRES": ["CRES"], "OPEN": ["C4A"], "FURANONE": ["C4A"],
+                 "PINAL": ["C7A"], "LIMAL": ["C7A"], "BALD": ["ACHO"],
+                 "PHEN": ["CRES"], "CSL": ["CRES"]}
+# Not deposited, although CMAQ deposits them: NO, CO, methane and the
+# hydrocarbons (hardly soluble and unreactive), NO3 (reacts within
+# minutes), H2SO4 (condenses on the particles within minutes), HCl (not
+# formed in this case), the alkane-like vapors (see below) and the more
+# volatile oxygenated vapors VROCP4OXY2, VROCP5OXY1, VROCP6OXY1, VROCIOXY
+# and SLOWROC (no counterpart in either source).
 # the oxygenated vapors of the organic aerosol deposit like the
 # hydroperoxides and epoxydiols: their effective Henry constants are
 # large (Hodzic et al., 2014; Knote et al., 2015). CMAQ deposits these
@@ -451,6 +501,24 @@ def biogenic_emissions(case):
             values[i] += ef * gamma * 1e-6 / MOLEC_WEIGHT_BIO[spec] / 3600.0
     return times, emit
 
+def zhang_daytime_vd(name):
+    """Daytime dry deposition velocity (cm/s) of the gas species name
+    after Zhang et al. (2003): the mean over its counterparts
+    ZHANG_SPECIES[name] (see there)."""
+    def ratio(s):
+        return ZHANG_TYPICAL_DAY[s] / ZHANG_MAX_DRY[s]
+    mean_ratio = (sum(ratio(s) for s in ZHANG_TYPICAL_DAY)
+                  / len(ZHANG_TYPICAL_DAY))
+    values = []
+    for s in ZHANG_SPECIES[name]:
+        if s in ZHANG_TYPICAL_DAY:
+            values.append(ZHANG_TYPICAL_DAY[s])
+        elif s in ZHANG_PATTERN:
+            values.append(ZHANG_MAX_DRY[s] * ratio(ZHANG_PATTERN[s]))
+        else:
+            values.append(ZHANG_MAX_DRY[s] * mean_ratio)
+    return sum(values) / len(values)
+
 def gas_deposition_profile(case):
     """Times (s), rate scalings (the diurnal cycle) and {species:
     daytime velocity (m/s)} of the gas dry deposition."""
@@ -464,6 +532,8 @@ def gas_deposition_profile(case):
                  / s_ref, GAS_VD_NIGHT_FRACTION) for t in times]
     vd = dict((k, 1e-2 * v) for (k, v) in GAS_VD_DAY.items())
     vd.update((k, 1e-2 * VAPOR_VD_DAY) for k in DEPOSITED_VAPORS)
+    assert not set(ZHANG_SPECIES) & set(vd), "species with two velocities"
+    vd.update((k, 1e-2 * zhang_daytime_vd(k)) for k in ZHANG_SPECIES)
     return times, rates, vd
 
 def mode_text(name, comp_file, num_conc, diam, log10_std):
@@ -700,6 +770,9 @@ def main(name):
               % (0.4 * params["u_mean"] / math.log(params["z_ref"]
                                                    / params["z_rough"]),
                  max(rates_d), min(rates_d), sum(rates_d[:48]) / 48.0))
+        print("daytime gas velocities after Zhang et al. (2003) (cm/s): "
+              + ", ".join("%s %.2f" % (k, zhang_daytime_vd(k))
+                          for k in ZHANG_SPECIES))
     else:
         for f in ("drydep_params.dat", "gas_deposition.dat"):
             if os.path.exists(f):
