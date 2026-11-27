@@ -991,10 +991,9 @@ contains
     integer, parameter :: CRIT_DIAM_MAX_ITER = 100
     integer, parameter :: CRIT_DIAM_N_SCAN = 300
     real(kind=dp), parameter :: CRIT_DIAM_SCAN_MAX_FACTOR = 1d4
-    real(kind=dp), parameter :: delta_min = 1.6d-10
     integer :: i, i_newton, i_best
     real(kind=dp) :: kappa, dry_diam, A, surf_eng_organic, v_solid, v_org
-    real(kind=dp) :: soluble_volume, sum_sol_sigma
+    real(kind=dp) :: soluble_volume, sum_sol_sigma, delta_min
     real(kind=dp) :: r_solid, v_delta_solid, c_1, c_2, c_3, c_4
     real(kind=dp) :: d, f, df, eff, s, s_best, d_best, log_fac
     real(kind=dp) :: x_lo, x_hi, f_lo, f_hi, dd, dxold
@@ -1006,6 +1005,8 @@ contains
          / (const%univ_gas_const * env_state%temp * const%water_density)
     kappa = aero_particle_solute_kappa(aero_particle, aero_data)
     dry_diam = aero_particle_dry_diameter(aero_particle, aero_data)
+    ! minimum thickness of the organic film (m)
+    delta_min = aero_data%est_delta_min
     surf_eng_organic = aero_particle_surf_eng_organic(aero_particle, aero_data)
     v_solid = aero_particle_solid_volume(aero_particle, aero_data)
     v_org = aero_particle_film_volume(aero_particle, aero_data)

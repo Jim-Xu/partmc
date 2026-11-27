@@ -40,6 +40,12 @@ module pmc_aero_data
   !! older species data files are still interpreted correctly), the
   !! primary organic carbon OC, and the organic aerosol species of
   !! CRACMM3 (CMAQ 6.0) in MOSAIC (generated list).
+  !> Default minimum thickness of the organic film of the effective
+  !> surface tension (EST) treatment (m): the value of the main
+  !> calculations of Ovadnevaite et al. (2017), who give 0.16 to 0.3 nm
+  !> as the range of this parameter.
+  real(kind=dp), parameter :: AERO_DATA_EST_DELTA_MIN_DEFAULT = 1.6d-10
+
   character(len=AERO_NAME_LEN), parameter :: AERO_ORGANIC_SPEC_NAME(41) = &
        [character(len=AERO_NAME_LEN) :: &
        "MSA",         "ARO1",        "ARO2",        "ALK1", &
@@ -105,6 +111,11 @@ module pmc_aero_data
      !> organic carbon mass OM:OC of the species (1), or 0 for species
      !> that contain no organic carbon.
      real(kind=dp), allocatable :: om_oc(:)
+     !> Minimum thickness of the organic film of the effective surface
+     !> tension (EST) treatment (m): the film covers the aqueous core
+     !> completely as long as it is at least this thick. Set by the
+     !> optional line \c est_delta_min of the spec file.
+     real(kind=dp) :: est_delta_min = AERO_DATA_EST_DELTA_MIN_DEFAULT
      !> Length \c aero_data_n_source(aero_data), source names.
      character(len=AERO_SOURCE_NAME_LEN), allocatable :: source_name(:)
      !> Length \c aero_data_n_weight_classes, weight class names.
@@ -688,6 +699,7 @@ contains
          + pmc_mpi_pack_size_real_array(val%sigma) &
          + pmc_mpi_pack_size_real_array(val%o_c) &
          + pmc_mpi_pack_size_real_array(val%om_oc) &
+         + pmc_mpi_pack_size_real(val%est_delta_min) &
          + pmc_mpi_pack_size_string_array(val%source_name) &
          + pmc_mpi_pack_size_string_array(val%weight_class_name) &
          + pmc_mpi_pack_size_fractal(val%fractal)
@@ -723,6 +735,7 @@ contains
     call pmc_mpi_pack_real_array(buffer, position, val%sigma)
     call pmc_mpi_pack_real_array(buffer, position, val%o_c)
     call pmc_mpi_pack_real_array(buffer, position, val%om_oc)
+    call pmc_mpi_pack_real(buffer, position, val%est_delta_min)
     call pmc_mpi_pack_string_array(buffer, position, val%source_name)
     call pmc_mpi_pack_string_array(buffer, position, val%weight_class_name)
     call pmc_mpi_pack_fractal(buffer, position, val%fractal)
@@ -761,6 +774,7 @@ contains
     call pmc_mpi_unpack_real_array(buffer, position, val%sigma)
     call pmc_mpi_unpack_real_array(buffer, position, val%o_c)
     call pmc_mpi_unpack_real_array(buffer, position, val%om_oc)
+    call pmc_mpi_unpack_real(buffer, position, val%est_delta_min)
     call pmc_mpi_unpack_string_array(buffer, position, val%source_name)
     call pmc_mpi_unpack_string_array(buffer, position, val%weight_class_name)
     call pmc_mpi_unpack_fractal(buffer, position, val%fractal)
@@ -1067,6 +1081,9 @@ contains
          "aero_om_oc", (/ dimid_aero_species /), unit="1", &
          long_name="ratios of organic mass to organic carbon mass of " &
          // "aerosol species (0 if no organic carbon)")
+    call pmc_nc_write_real(ncid, aero_data%est_delta_min, &
+         "aero_est_delta_min", unit="m", long_name="minimum thickness of " &
+         // "the organic film of the effective surface tension treatment")
     call pmc_nc_write_integer(ncid, aero_data%i_water, &
          "aero_i_water", long_name="Index of aerosol water or " &
          // "0 if water does not exist.")
@@ -1204,6 +1221,13 @@ contains
     call assert(377166448, aero_weight_class_names == "")
 
     call pmc_nc_read_integer(ncid, aero_data%i_water, "aero_i_water")
+    call pmc_nc_read_real(ncid, aero_data%est_delta_min, &
+         "aero_est_delta_min", must_be_present=.false.)
+    if (aero_data%est_delta_min <= 0d0) then
+       ! Backward compatibility: files written before the minimum film
+       ! thickness became an option have no aero_est_delta_min variable.
+       aero_data%est_delta_min = AERO_DATA_EST_DELTA_MIN_DEFAULT
+    end if
 
     call fractal_input_netcdf(aero_data%fractal, ncid)
 

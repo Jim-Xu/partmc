@@ -45,11 +45,6 @@ module pmc_condense
   !> (for debugging only).
   logical, parameter :: CONDENSE_DO_TEST_COUNTS = .false.
 
-  !> Minimum thickness of the organic film (m) for the effective
-  !> surface tension (EST) treatment. Must be consistent with the
-  !> value used in aero_particle_crit_diameter_est().
-  real(kind=dp), parameter :: CONDENSE_EST_DELTA_MIN = 1.6d-10
-
   !> Result code indicating successful completion.
   integer, parameter :: PMC_CONDENSE_SOLVER_SUCCESS        = 0
   !> Result code indicating failure to allocate \c y vector.
@@ -147,6 +142,12 @@ module pmc_condense
   !> surface tension (EST) \f$\sigma(D)\f$ during calls to the ODE
   !> solver.
   logical :: condense_do_est = .false.
+  !> Internal-use variable for storing the minimum thickness of the
+  !> organic film (m) of the effective surface tension (EST) treatment
+  !> (\c aero_data%%est_delta_min, as used in
+  !> aero_particle_crit_diameter_est()) during calls to the ODE solver.
+  real(kind=dp) :: condense_saved_est_delta_min &
+       = AERO_DATA_EST_DELTA_MIN_DEFAULT
   !> Internal-use variable for storing the per-particle organic
   !> (shell) volumes during calls to the ODE solver.
   real(kind=dp), allocatable :: condense_saved_v_org(:)
@@ -242,6 +243,7 @@ contains
     condense_saved_pdot &
          = (env_state_final%pressure - env_state_initial%pressure) / del_t
     condense_do_est = do_est
+    condense_saved_est_delta_min = aero_data%est_delta_min
 
     ! construct initial state vector from aero_state and env_state
     allocate(condense_saved_kappa(aero_state_n_part(aero_state)))
@@ -519,7 +521,7 @@ contains
   !! re-derived eqs. (31) and (67) (condense_sigmaD.tex, eqs.
   !! \c eq:dhdD_new and \c eq:dgdD_new).
   subroutine condense_est_surf_eng(D, v_org, surf_eng_core, &
-       surf_eng_shell, surf_eng, surf_eng_R)
+       surf_eng_shell, delta_min, surf_eng, surf_eng_R)
 
     !> Wet diameter (m) at which to evaluate the surface tension.
     real(kind=dp), intent(in) :: D
@@ -529,6 +531,9 @@ contains
     real(kind=dp), intent(in) :: surf_eng_core
     !> Surface tension of the shell (organic film) phase (J m^{-2}).
     real(kind=dp), intent(in) :: surf_eng_shell
+    !> Minimum thickness of the organic film
+    !> \f$\delta_{\rm min}\f$ (m).
+    real(kind=dp), intent(in) :: delta_min
     !> Effective surface tension \f$\sigma(D)\f$ (J m^{-2}).
     real(kind=dp), intent(out) :: surf_eng
     !> Combination \f$\mathcal{R}(D) = \sigma(D) - D \sigma'(D)\f$
@@ -549,7 +554,7 @@ contains
     if (v_core > 0d0) then
        r_core = (3d0 * v_core / (4d0 * const%pi))**(1d0 / 3d0)
        v_delta = 4d0 * const%pi / 3d0 &
-            * ((r_core + CONDENSE_EST_DELTA_MIN)**3 - r_core**3)
+            * ((r_core + delta_min)**3 - r_core**3)
     else
        ! particle is all organic at this diameter: fully covered
        r_core = 0d0
@@ -566,8 +571,8 @@ contains
     ! partial coverage
     delta_surf_eng = surf_eng_shell - surf_eng_core
     surf_eng = surf_eng_core + v_org / v_delta * delta_surf_eng
-    d_v_delta = const%pi * CONDENSE_EST_DELTA_MIN &
-         * (2d0 * r_core + CONDENSE_EST_DELTA_MIN) * D**2 &
+    d_v_delta = const%pi * delta_min &
+         * (2d0 * r_core + delta_min) * D**2 &
          / (2d0 * r_core**2)
     d_surf_eng = - v_org * delta_surf_eng * d_v_delta / v_delta**2
     surf_eng_R = surf_eng - D * d_surf_eng
@@ -675,7 +680,8 @@ contains
     if (condense_do_est) then
        A_k = 4d0 * M_w / (const%univ_gas_const * inputs%T * rho_w)
        call condense_est_surf_eng(inputs%D, inputs%v_org, &
-            inputs%surf_eng_core, inputs%surf_eng_shell, sigma_est, R_est)
+            inputs%surf_eng_core, inputs%surf_eng_shell, &
+            condense_saved_est_delta_min, sigma_est, R_est)
        kelvin_arg = A_k * sigma_est / inputs%D
        kelvin_fac = A_k * R_est / inputs%D**2
     else
@@ -998,7 +1004,7 @@ contains
        ! sigma(D) routine as the growth function in condense_rates().
        if (do_est) then
           call condense_est_surf_eng(D, v_org, surf_eng_core, &
-               surf_eng_shell, sigma_est, R_est)
+               surf_eng_shell, aero_data%est_delta_min, sigma_est, R_est)
           kelvin_arg = A_k * sigma_est / D
           kelvin_fac = A_k * R_est / D**2
        else

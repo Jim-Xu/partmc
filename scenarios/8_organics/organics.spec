@@ -42,6 +42,7 @@ start_day 172                   # start day of year (UTC)
 do_coagulation yes              # whether to do coagulation (yes/no)
 coag_kernel brown               # coagulation kernel
 do_condensation no              # whether to do condensation (yes/no)
+est_delta_min 1.6e-10           # minimum thickness of the organic film of the EST (m)
 do_mosaic yes                   # whether to do MOSAIC (yes/no)
 do_optical yes                  # whether to compute optical props (yes/no)
 do_fixed_photolysis no          # whether to use fixed photolysis rates (yes/no)

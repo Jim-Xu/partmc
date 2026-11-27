@@ -74,6 +74,10 @@ CASE = {
     # experiments of Shilling et al. (2008), mostly as highly oxygenated
     # molecules
     "monoterpene_scale": 1.0,
+    # minimum thickness of the organic film of the effective surface
+    # tension (EST) with which the processing program computes the CCN
+    # (m); Ovadnevaite et al. (2017) give 0.16 to 0.3 nm
+    "est_delta_min": 1.6e-10,
     # PPFD transmission of the atmosphere (ratio of the PPFD above the
     # canopy to that at the top of the atmosphere), the value of the
     # standard conditions of MEGAN (Guenther et al., 2006)
@@ -763,6 +767,7 @@ start_day %(start_day)d                   # start day of year (UTC)
 do_coagulation yes              # whether to do coagulation (yes/no)
 coag_kernel brown               # coagulation kernel
 do_condensation no              # whether to do condensation (yes/no)
+est_delta_min %(est_delta_min)g           # minimum thickness of the organic film of the EST (m)
 do_mosaic yes                   # whether to do MOSAIC (yes/no)
 do_optical yes                  # whether to compute optical props (yes/no)
 do_fixed_photolysis no          # whether to use fixed photolysis rates (yes/no)

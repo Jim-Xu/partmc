@@ -420,6 +420,22 @@ contains
     !!     the water content of each particle before starting the
     !!     simulation, note that \b do_init_equilibriate (sic!)
     !!     spelling will work as well for compatibility
+    !!   - \b do_est (logical): whether the condensation uses the
+    !!     effective surface tension (EST) of an organic film on the
+    !!     particles instead of the surface tension of water
+    !! - \b est_delta_min (real, unit m, optional, directly after
+    !!   \c do_condensation and its parameters): the minimum thickness
+    !!   of the organic film of the effective surface tension (EST)
+    !!   treatment. The film covers the aqueous core of a particle
+    !!   completely as long as it is at least this thick. Ovadnevaite
+    !!   et al. (2017, Nature 546, 637-641) give 0.16 to 0.3 nm as the
+    !!   range of this parameter. The default is 1.6e-10 m; a
+    !!   restarted run without this line keeps the value of the
+    !!   restart file. The value is written to the output files as
+    !!   \c aero_est_delta_min, so that the programs that process them
+    !!   compute the critical supersaturations with it
+    !!   (aero_particle_crit_rel_humid_est()). Without condensation it
+    !!   does not change the run itself.
     !! - \b do_mosaic (logical): whether to use the MOSAIC chemistry
     !!   code (requires support to be compiled in; cannot be used
     !!   simultaneously with condensation). If \c do_mosaic is \c

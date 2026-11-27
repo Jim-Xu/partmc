@@ -747,6 +747,19 @@ contains
             do_init_equilibrate)
        call spec_file_read_logical(file, 'do_est', run_part_opt%do_est)
     end if
+    ! optional minimum thickness of the organic film of the effective
+    ! surface tension treatment (otherwise the default, or the value of
+    ! the restart file)
+    call spec_file_read_line(file, line, eof)
+    if (.not. eof) call spec_file_unread_line(file)
+    if ((.not. eof) .and. (line%name == 'est_delta_min')) then
+       call spec_file_read_real(file, 'est_delta_min', &
+            aero_data%est_delta_min)
+       if (aero_data%est_delta_min <= 0d0) then
+          call spec_file_die_msg(416283057, file, &
+               "est_delta_min must be positive")
+       end if
+    end if
 
     call spec_file_read_logical(file, 'do_mosaic', run_part_opt%do_mosaic)
     if (run_part_opt%do_mosaic .and. (.not. mosaic_support())) then
