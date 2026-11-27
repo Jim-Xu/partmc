@@ -17,12 +17,16 @@
 !> supersaturations; between these two limits, the CCN concentrations
 !> with the film only on the particles whose organic matter has an O:C
 !> up to a limit, for three such limits from laboratory studies of the
-!> phase separation near saturation. The phase separation and the CCN
-!> concentrations are also computed for two internal mixtures of the
-!> same particles, to show what the per-particle composition changes:
-!> every particle with the average dry composition of all particles, and
-!> every particle with the average dry composition of the particles in
-!> its size section.
+!> phase separation near saturation. For each of these CCN
+!> concentrations the program also gives what a CCN counter with a
+!> particle sizer would report: the critical dry diameter above which
+!> the particles number as many as the CCN, and the kappa that this
+!> diameter gives with the surface tension of water. The phase
+!> separation and the CCN concentrations are also computed for two
+!> internal mixtures of the same particles, to show what the
+!> per-particle composition changes: every particle with the average dry
+!> composition of all particles, and every particle with the average dry
+!> composition of the particles in its size section.
 !> The number and mass concentrations, the O:C, the phase separation and
 !> the CCN concentrations are also computed for the particles of each
 !> class by origin: the urban primary particles, the urban and regional
@@ -148,6 +152,7 @@ program process
   logical, allocatable :: is_mixed(:), is_separated(:), has_film(:,:)
   real(kind=dp) :: tot_org_part_mass_conc
   integer :: i_ss, i_film
+  real(kind=dp) :: crit_diam, ccn_kappa
   type(aero_state_t) :: mixed_aero_state
   integer :: i_mix
   real(kind=dp) :: srh_intmix, tot_org_mix_mass_conc
@@ -183,7 +188,11 @@ program process
        stats_mix_llps_num_frac(N_MIX), stats_mix_llps_org_frac(N_MIX), &
        stats_mix_ccn_conc(N_SS, N_MIX), stats_mix_ccn_est_conc(N_SS, N_MIX), &
        stats_film_num_frac(N_FILM), stats_ccn_film_conc(N_SS, N_FILM), &
-       stats_mix_ccn_film_conc(N_SS, N_FILM, N_MIX), stats_film_o_c
+       stats_mix_ccn_film_conc(N_SS, N_FILM, N_MIX), stats_film_o_c, &
+       stats_ccn_crit_diam(N_SS), stats_ccn_kappa(N_SS), &
+       stats_ccn_est_crit_diam(N_SS), stats_ccn_est_kappa(N_SS), &
+       stats_ccn_film_crit_diam(N_SS, N_FILM), &
+       stats_ccn_film_kappa(N_SS, N_FILM)
   type(stats_2d_t) :: stats_diam_o_c_dist, stats_diam_sec_frac_dist, &
        stats_diam_srh_dist, stats_diam_sc_dist, stats_diam_sc_est_dist, &
        stats_diam_kappa_dist, stats_entry_srh_dist
@@ -451,6 +460,31 @@ program process
               call stats_1d_add_entry(stats_ccn_film_conc(i_ss, i_film), &
                    sum(num_concs, mask=(scs_film(:, i_film) &
                    <= CCN_SS(i_ss) / 100d0)), i_index)
+           end do
+        end do
+        ! critical dry diameter and kappa that a CCN counter with a
+        ! particle sizer would derive from each of these CCN
+        ! concentrations (see ccn_crit_diam_kappa below)
+        do i_ss = 1,N_SS
+           call ccn_crit_diam_kappa(env_state, dry_diameters, num_concs, &
+                scs, CCN_SS(i_ss) / 100d0, crit_diam, ccn_kappa)
+           call stats_1d_add_entry(stats_ccn_crit_diam(i_ss), crit_diam, &
+                i_index)
+           call stats_1d_add_entry(stats_ccn_kappa(i_ss), ccn_kappa, i_index)
+           call ccn_crit_diam_kappa(env_state, dry_diameters, num_concs, &
+                scs_est, CCN_SS(i_ss) / 100d0, crit_diam, ccn_kappa)
+           call stats_1d_add_entry(stats_ccn_est_crit_diam(i_ss), crit_diam, &
+                i_index)
+           call stats_1d_add_entry(stats_ccn_est_kappa(i_ss), ccn_kappa, &
+                i_index)
+           do i_film = 1,N_FILM
+              call ccn_crit_diam_kappa(env_state, dry_diameters, num_concs, &
+                   scs_film(:, i_film), CCN_SS(i_ss) / 100d0, crit_diam, &
+                   ccn_kappa)
+              call stats_1d_add_entry(stats_ccn_film_crit_diam(i_ss, i_film), &
+                   crit_diam, i_index)
+              call stats_1d_add_entry(stats_ccn_film_kappa(i_ss, i_film), &
+                   ccn_kappa, i_index)
            end do
         end do
         diam_sc_dist = bin_grid_histogram_2d(diam_grid, dry_diameters, &
@@ -727,6 +761,25 @@ program process
              // CCN_SS_NAME(i_ss), dim_name="time", unit="m^{-3}")
      end do
   end do
+  do i_ss = 1,N_SS
+     call stats_1d_output_netcdf(stats_ccn_crit_diam(i_ss), ncid, &
+          "ccn_crit_diam_" // CCN_SS_NAME(i_ss), dim_name="time", unit="m")
+     call stats_1d_output_netcdf(stats_ccn_kappa(i_ss), ncid, &
+          "ccn_kappa_" // CCN_SS_NAME(i_ss), dim_name="time", unit="1")
+     call stats_1d_output_netcdf(stats_ccn_est_crit_diam(i_ss), ncid, &
+          "ccn_est_crit_diam_" // CCN_SS_NAME(i_ss), dim_name="time", &
+          unit="m")
+     call stats_1d_output_netcdf(stats_ccn_est_kappa(i_ss), ncid, &
+          "ccn_est_kappa_" // CCN_SS_NAME(i_ss), dim_name="time", unit="1")
+     do i_film = 1,N_FILM
+        call stats_1d_output_netcdf(stats_ccn_film_crit_diam(i_ss, i_film), &
+             ncid, "ccn_film_crit_diam_" // FILM_NAME(i_film) // "_" &
+             // CCN_SS_NAME(i_ss), dim_name="time", unit="m")
+        call stats_1d_output_netcdf(stats_ccn_film_kappa(i_ss, i_film), &
+             ncid, "ccn_film_kappa_" // FILM_NAME(i_film) // "_" &
+             // CCN_SS_NAME(i_ss), dim_name="time", unit="1")
+     end do
+  end do
   call stats_1d_output_netcdf(stats_srh_intmix, ncid, "srh_intmix", &
        dim_name="time", unit="1")
   do i_mix = 1,N_MIX
@@ -967,6 +1020,100 @@ contains
     end do
 
   end subroutine llps_ccn
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !> Critical dry diameter and kappa that a CCN counter with a particle
+  !> sizer would derive at one supersaturation.
+  !!
+  !! Measurements of the CCN concentration at a supersaturation \c s
+  !! next to the number size distribution of the dry particles give the
+  !! critical dry diameter as the diameter above which the size
+  !! distribution holds as many particles as there are CCN (Moore et
+  !! al., 2011, Eq. 2; Cerully et al., 2015, Sect. 3.2), and from it the
+  !! hygroscopicity parameter with the surface tension of water, by
+  !! convention (Petters and Kreidenweis, 2007, Eq. 10, their
+  !! approximation for kappa above 0.2; Cerully et al., 2015, Eq. 1):
+  !! kappa = 4 A^3 / (27 D_c^3 ln^2(1 + s)), with A = 4 sigma_w M_w /
+  !! (R T rho_w). The same is done here with the particles as simulated:
+  !! the CCN concentration is that of the particles with a critical
+  !! supersaturation of at most \c s, and the critical diameter is the
+  !! largest dry diameter of a particle such that the particles of at
+  !! least that diameter number at least as many. If the particles
+  !! activate in the order of their size this is the dry diameter of the
+  !! smallest particle that activates; for particles of different
+  !! composition it is a diameter in between, as it is for the
+  !! instruments. A lower surface tension makes smaller particles
+  !! activate, so that the kappa rises above that of the composition:
+  !! this is how an organic film shows in such measurements (Ovadnevaite
+  !! et al., 2017).
+  !!
+  !! The temperature is that of the output, as for the critical
+  !! supersaturations, whereas a CCN counter works at the temperature of
+  !! its column; the kappa hardly depends on this, the critical diameter
+  !! is proportional to A at a given kappa. If all particles activate,
+  !! the critical diameter is at most that of the smallest particle, and
+  !! if none activates, at least that of the largest; these diameters
+  !! are returned then, so that the kappa is a lower or an upper bound
+  !! (the CCN concentration equals the number concentration or zero).
+  subroutine ccn_crit_diam_kappa(env_state, dry_diameters, num_concs, scs, &
+       ss, crit_diam, ccn_kappa)
+
+    !> Environment state.
+    type(env_state_t), intent(in) :: env_state
+    !> Dry diameter of each particle (m).
+    real(kind=dp), intent(in) :: dry_diameters(:)
+    !> Number concentration of each particle (m^{-3}).
+    real(kind=dp), intent(in) :: num_concs(:)
+    !> Critical supersaturation of each particle (1).
+    real(kind=dp), intent(in) :: scs(:)
+    !> Supersaturation of the measurement (1).
+    real(kind=dp), intent(in) :: ss
+    !> Critical dry diameter (m).
+    real(kind=dp), intent(out) :: crit_diam
+    !> Hygroscopicity parameter derived from the critical diameter (1).
+    real(kind=dp), intent(out) :: ccn_kappa
+
+    !> Number of bisection steps: enough to separate any two diameters
+    !> that differ in double precision.
+    integer, parameter :: N_STEP = 100
+    !> Relative tolerance of the comparison of number concentrations,
+    !> far below the share of one computational particle.
+    real(kind=dp), parameter :: CONC_REL_TOL = 1d-9
+
+    integer :: i_step
+    real(kind=dp) :: ccn_conc, diam_lo, diam_hi, diam_mid
+
+    crit_diam = 0d0
+    ccn_kappa = 0d0
+    if (size(dry_diameters) == 0) return
+
+    ccn_conc = sum(num_concs, mask=(scs <= ss))
+    if (ccn_conc <= 0d0) then
+       crit_diam = maxval(dry_diameters)
+    else
+       ! the number concentration of the particles of at least a given
+       ! diameter does not rise with the diameter: bisect for the
+       ! largest diameter at which it is still at least the CCN
+       ! concentration; the particles of at least diam_lo always number
+       ! that many, those of at least diam_hi do not
+       diam_lo = minval(dry_diameters)
+       diam_hi = 2d0 * maxval(dry_diameters)
+       do i_step = 1,N_STEP
+          diam_mid = sqrt(diam_lo * diam_hi)
+          if (sum(num_concs, mask=(dry_diameters >= diam_mid)) &
+               >= ccn_conc * (1d0 - CONC_REL_TOL)) then
+             diam_lo = diam_mid
+          else
+             diam_hi = diam_mid
+          end if
+       end do
+       crit_diam = minval(dry_diameters, mask=(dry_diameters >= diam_lo))
+    end if
+    ccn_kappa = 4d0 * env_state_A(env_state)**3 &
+         / (27d0 * crit_diam**3 * log(1d0 + ss)**2)
+
+  end subroutine ccn_crit_diam_kappa
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
