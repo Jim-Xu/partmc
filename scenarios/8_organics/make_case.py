@@ -80,6 +80,9 @@ CASE = {
     "ppfd_transmission": 0.6,
     # dry deposition of particles and gases to the forest (see below)
     "deposition": True,
+    # the gas deposition velocities of Zhang et al. (2003) follow the
+    # temperature and humidity of the case in the daytime (see below)
+    "vd_response": True,
     # wind speed at 20 m for the particle dry deposition: with the
     # roughness length of the forest a friction velocity of 0.28 m/s
     "wind_speed": 2.0,                 # m/s
@@ -99,6 +102,9 @@ CASES = {
     # half and a quarter of the monoterpene emissions
     "urban_forest_mt050": {"monoterpene_scale": 0.5},
     "urban_forest_mt025": {"monoterpene_scale": 0.25},
+    # gas deposition velocities of Zhang et al. (2003) at their typical
+    # values (20 C, RH 75%) all day
+    "urban_forest_vdtyp": {"vd_response": False},
 }
 
 ######################################################################
@@ -344,6 +350,54 @@ ZHANG_SPECIES = {"O3": ["O3"], "SO2": ["SO2"], "NO2": ["NO2"],
                  "CRES": ["CRES"], "OPEN": ["C4A"], "FURANONE": ["C4A"],
                  "PINAL": ["C7A"], "LIMAL": ["C7A"], "BALD": ["ACHO"],
                  "PHEN": ["CRES"], "CSL": ["CRES"]}
+# Response to temperature and humidity. Table 4 holds for 20 C and RH
+# 75%; the case reaches 30 C and RH 53% in the afternoon, when the
+# stomata partly close and the dry cuticles take up less. In the daytime
+# the velocities therefore follow the canopy resistance Rc of the same
+# paper for a dry canopy (Eqs. 1 to 4, 6, 7 and 9a):
+#   Vd = 1 / (Ra + Rb + Rc),  1/Rc = 1/Rst + 1/(Rac + Rg) + 1/Rcut,
+#   Rac = Rac0 LAI^(1/4) / u*^2,
+#   Rcut = Rcutd0 / (exp(0.03 RH) LAI^(1/4) u*)  (RH in percent),
+#   Rst proportional to 1 / (f(T) f(D)),  f(D) = 1 - bvpd D,
+# with f(T) of Eq. (6a) and the vapor pressure deficit D (kPa). Rg and
+# Rcut of a gas are scaled between those of SO2 and O3:
+# 1/R = alpha/R(SO2) + beta/R(O3). Parameters of the land use category
+# 25 (Table 1; Rg of O3 is 200 s/m for vegetated surfaces), the leaf
+# area index 5 of June to August (Fig. 2) and the daytime friction
+# velocity of Table 4 (Table 3):
+ZHANG_CANOPY = {"rac0": 100.0, "rcutd0_o3": 4000.0, "rcutd0_so2": 2500.0,
+                "rg_so2": 200.0, "rg_o3": 200.0,              # s/m
+                "t_min": -3.0, "t_max": 42.0, "t_opt": 21.0,  # C
+                "b_vpd": 0.34,                                # kPa^-1
+                "lai": 5.0, "u_star": 0.6}                    # 1, m/s
+ZHANG_TYPICAL_STATE = (293.15, 0.75)     # temperature (K), RH (1)
+# alpha and beta of the five gases of Table 4 (Sect. 4.2)
+ZHANG_ALPHA_BETA = {"SO2": (1.0, 0.0), "HCHO": (0.8, 0.2),
+                    "O3": (0.0, 1.0), "PAN": (0.0, 0.6),
+                    "HNO3": (10.0, 10.0)}
+# The paper gives neither Ra + Rb nor the stomatal resistances behind
+# Table 4. Both follow from the table: Ra + Rb (taken the same for all
+# gases) from HNO3, whose canopy resistance is small, and the stomatal
+# resistance of each gas as the remainder. Two checks
+# (zhang_canopy_check): the stomatal resistances of SO2, HCHO, O3 and
+# PAN found this way are within 1% of the ratios of the square roots of
+# their molecular weights (g/mol), as for molecular diffusion; and
+# without stomatal uptake, at the nighttime friction velocity of
+# Table 3, the same formulas give the dry-night velocities of Table 4
+# (cm/s) within 4%.
+ZHANG_MOLEC_WEIGHT = {"SO2": 64.07, "HCHO": 30.03, "O3": 48.00,
+                      "PAN": 121.05, "HNO3": 63.01}
+ZHANG_TYPICAL_NIGHT = {"SO2": 0.20, "HCHO": 0.20, "O3": 0.15, "PAN": 0.11,
+                       "HNO3": 1.27}
+ZHANG_U_STAR_NIGHT = 0.3                 # m/s
+# The other species respond like the gas whose pattern they follow
+# (ZHANG_PATTERN), otherwise like the mean of the five gases. The
+# response applies while the sun is up; at night the stomata are closed
+# and the velocities stay at the fraction GAS_VD_NIGHT_FRACTION of the
+# typical values. The measured velocities (GAS_VD_DAY) were taken on
+# summer days at such a forest and are not changed. The water stress
+# factor of the paper (Eq. 6e) is 1 up to a solar radiation of
+# 985 W m^-2, and the canopy is taken as dry (no dew).
 # Not deposited, although CMAQ deposits them: NO, CO, methane and the
 # hydrocarbons (hardly soluble and unreactive), NO3 (reacts within
 # minutes), H2SO4 (condenses on the particles within minutes), HCl (not
@@ -501,10 +555,105 @@ def biogenic_emissions(case):
             values[i] += ef * gamma * 1e-6 / MOLEC_WEIGHT_BIO[spec] / 3600.0
     return times, emit
 
-def zhang_daytime_vd(name):
+def sat_vapor_pressure(temp):
+    """Saturation vapor pressure of water (Pa) at temp (K), as in PartMC
+    (env_state_sat_vapor_pressure)."""
+    return 611.0 * 10.0**(7.45 * (temp - 273.15) / (temp - 38.0))
+
+def rel_humidity(case, t):
+    """Relative humidity (1): PartMC keeps the water vapor mixing ratio,
+    so that at constant pressure the relative humidity follows the
+    temperature."""
+    return (case["rel_humidity"] * sat_vapor_pressure(temperature(case, 0.0))
+            / sat_vapor_pressure(temperature(case, t)))
+
+def zhang_nonstomatal(spec, u_star, rh):
+    """Non-stomatal conductance (m/s) of the dry canopy for the gas spec
+    at the friction velocity u_star (m/s) and the relative humidity rh
+    (1): Zhang et al. (2003), Eqs. (3), (4), (7) and (9a)."""
+    p = ZHANG_CANOPY
+    alpha, beta = ZHANG_ALPHA_BETA[spec]
+    lai4 = p["lai"]**0.25
+    r_ac = p["rac0"] * lai4 / u_star**2
+    r_g = 1.0 / (alpha / p["rg_so2"] + beta / p["rg_o3"])
+    g_cut = ((alpha / p["rcutd0_so2"] + beta / p["rcutd0_o3"])
+             * math.exp(3.0 * rh) * lai4 * u_star)
+    return 1.0 / (r_ac + r_g) + g_cut
+
+def zhang_stomatal_factor(temp, rh):
+    """f(T) f(D) of the stomatal conductance at temp (K) and rh (1):
+    Zhang et al. (2003), Eqs. (6a) to (6d)."""
+    p = ZHANG_CANOPY
+    temp_c = temp - 273.15
+    if not p["t_min"] < temp_c < p["t_max"]:
+        return 0.0
+    b_t = (p["t_max"] - p["t_opt"]) / (p["t_opt"] - p["t_min"])
+    f_t = ((temp_c - p["t_min"]) / (p["t_opt"] - p["t_min"])
+           * ((p["t_max"] - temp_c) / (p["t_max"] - p["t_opt"]))**b_t)
+    deficit = 1e-3 * sat_vapor_pressure(temp) * (1.0 - rh)      # kPa
+    return f_t * max(1.0 - p["b_vpd"] * deficit, 0.0)
+
+def zhang_typical_state():
+    """Ra + Rb (s/m) and {gas: stomatal conductance (m/s)} of the five
+    gases in the typical daytime state of Table 4 of Zhang et al. (2003),
+    from the velocities of that table (see ZHANG_MOLEC_WEIGHT)."""
+    rh = ZHANG_TYPICAL_STATE[1]
+    g_ns = dict((s, zhang_nonstomatal(s, ZHANG_CANOPY["u_star"], rh))
+                for s in ZHANG_TYPICAL_DAY)
+    r_total = dict((s, 100.0 / v) for (s, v) in ZHANG_TYPICAL_DAY.items())
+    r_ab, g_st = 0.0, {}
+    for _ in range(20):
+        g_st["O3"] = 1.0 / (r_total["O3"] - r_ab) - g_ns["O3"]
+        g_st["HNO3"] = g_st["O3"] * math.sqrt(ZHANG_MOLEC_WEIGHT["O3"]
+                                              / ZHANG_MOLEC_WEIGHT["HNO3"])
+        r_ab = r_total["HNO3"] - 1.0 / (g_ns["HNO3"] + g_st["HNO3"])
+    for s in ZHANG_TYPICAL_DAY:
+        if s not in g_st:
+            g_st[s] = 1.0 / (r_total[s] - r_ab) - g_ns[s]
+    return r_ab, g_st
+
+def zhang_canopy_check():
+    """Check the canopy resistance against Table 4 of Zhang et al. (2003)
+    (see ZHANG_MOLEC_WEIGHT). Returns the largest relative deviations of
+    the stomatal resistances from the scaling with the square root of
+    the molecular weight and of the dry-night velocities."""
+    r_ab, g_st = zhang_typical_state()
+    dev_st = max(abs(g_st["O3"] / g_st[s]
+                     * math.sqrt(ZHANG_MOLEC_WEIGHT["O3"]
+                                 / ZHANG_MOLEC_WEIGHT[s]) - 1.0)
+                 for s in ("SO2", "HCHO", "PAN"))
+    rh = ZHANG_TYPICAL_STATE[1]
+    r_ns = dict((s, 1.0 / zhang_nonstomatal(s, ZHANG_U_STAR_NIGHT, rh))
+                for s in ZHANG_TYPICAL_NIGHT)
+    r_ab_night = 100.0 / ZHANG_TYPICAL_NIGHT["HNO3"] - r_ns["HNO3"]
+    dev_night = max(abs(100.0 / (r_ab_night + r_ns[s])
+                        / ZHANG_TYPICAL_NIGHT[s] - 1.0)
+                    for s in ("SO2", "HCHO", "O3", "PAN"))
+    assert dev_st < 0.02 and dev_night < 0.05, \
+        "canopy resistance inconsistent with Table 4 of Zhang et al. (2003)"
+    return dev_st, dev_night
+
+def zhang_response(spec, temp, rh):
+    """Velocity of the gas spec of Zhang et al. (2003) at temp (K) and rh
+    (1) relative to that in the typical daytime state of Table 4."""
+    if spec in ZHANG_PATTERN:
+        spec = ZHANG_PATTERN[spec]
+    if spec not in ZHANG_TYPICAL_DAY:
+        return (sum(zhang_response(s, temp, rh) for s in ZHANG_TYPICAL_DAY)
+                / len(ZHANG_TYPICAL_DAY))
+    r_ab, g_st = zhang_typical_state()
+    factor = (zhang_stomatal_factor(temp, rh)
+              / zhang_stomatal_factor(*ZHANG_TYPICAL_STATE))
+    g_c = (g_st[spec] * factor
+           + zhang_nonstomatal(spec, ZHANG_CANOPY["u_star"], rh))
+    return 100.0 / (r_ab + 1.0 / g_c) / ZHANG_TYPICAL_DAY[spec]
+
+def zhang_daytime_vd(name, temp=None, rh=None):
     """Daytime dry deposition velocity (cm/s) of the gas species name
     after Zhang et al. (2003): the mean over its counterparts
-    ZHANG_SPECIES[name] (see there)."""
+    ZHANG_SPECIES[name] (see there), in the typical state of Table 4 or,
+    with them, at the temperature temp (K) and the relative humidity rh
+    (1)."""
     def ratio(s):
         return ZHANG_TYPICAL_DAY[s] / ZHANG_MAX_DRY[s]
     mean_ratio = (sum(ratio(s) for s in ZHANG_TYPICAL_DAY)
@@ -512,16 +661,19 @@ def zhang_daytime_vd(name):
     values = []
     for s in ZHANG_SPECIES[name]:
         if s in ZHANG_TYPICAL_DAY:
-            values.append(ZHANG_TYPICAL_DAY[s])
+            v = ZHANG_TYPICAL_DAY[s]
         elif s in ZHANG_PATTERN:
-            values.append(ZHANG_MAX_DRY[s] * ratio(ZHANG_PATTERN[s]))
+            v = ZHANG_MAX_DRY[s] * ratio(ZHANG_PATTERN[s])
         else:
-            values.append(ZHANG_MAX_DRY[s] * mean_ratio)
+            v = ZHANG_MAX_DRY[s] * mean_ratio
+        if temp is not None:
+            v *= zhang_response(s, temp, rh)
+        values.append(v)
     return sum(values) / len(values)
 
 def gas_deposition_profile(case):
     """Times (s), rate scalings (the diurnal cycle) and {species:
-    daytime velocity (m/s)} of the gas dry deposition."""
+    [daytime velocity (m/s) at each time]} of the gas dry deposition."""
     times = [EMIT_STEP * i for i in range(int(case["hours"] * 3600
                                               / EMIT_STEP))]
     t10 = (10.0 - case["start_local_hour"]) * 3600.0
@@ -530,10 +682,19 @@ def gas_deposition_profile(case):
     s_ref = sum(ref) / len(ref)
     rates = [max(max(sin_solar_elevation(case, t + 0.5 * EMIT_STEP), 0.0)
                  / s_ref, GAS_VD_NIGHT_FRACTION) for t in times]
-    vd = dict((k, 1e-2 * v) for (k, v) in GAS_VD_DAY.items())
-    vd.update((k, 1e-2 * VAPOR_VD_DAY) for k in DEPOSITED_VAPORS)
+    vd = dict((k, [1e-2 * v] * len(times)) for (k, v) in GAS_VD_DAY.items())
+    vd.update((k, [1e-2 * VAPOR_VD_DAY] * len(times))
+              for k in DEPOSITED_VAPORS)
     assert not set(ZHANG_SPECIES) & set(vd), "species with two velocities"
-    vd.update((k, 1e-2 * zhang_daytime_vd(k)) for k in ZHANG_SPECIES)
+    for k in ZHANG_SPECIES:
+        vd[k] = []
+        for t in times:
+            tm = t + 0.5 * EMIT_STEP
+            if case["vd_response"] and sin_solar_elevation(case, tm) > 0.0:
+                vd[k].append(1e-2 * zhang_daytime_vd(
+                    k, temperature(case, tm), rel_humidity(case, tm)))
+            else:
+                vd[k].append(1e-2 * zhang_daytime_vd(k))
     return times, rates, vd
 
 def mode_text(name, comp_file, num_conc, diam, log10_std):
@@ -758,7 +919,8 @@ def main(name):
               "# dry deposition velocities (m/s)\n"
               + "%-11s" % "time" + "".join("%10d" % t for t in times_d) + "\n"
               + "%-11s" % "rate" + "".join("%10.4f" % r for r in rates_d)
-              + "\n" + "".join("%-11s" % k + "%10.3E" % vd[k] * len(times_d)
+              + "\n" + "".join("%-11s" % k
+                               + "".join("%10.3E" % v for v in vd[k])
                                + "\n" for k in gas_species if k in vd))
         loss_lines = ("loss_function drydep            # loss function "
                       "specification\ndrydep_params drydep_params.dat "
@@ -773,6 +935,20 @@ def main(name):
         print("daytime gas velocities after Zhang et al. (2003) (cm/s): "
               + ", ".join("%s %.2f" % (k, zhang_daytime_vd(k))
                           for k in ZHANG_SPECIES))
+        if case["vd_response"]:
+            dev_st, dev_night = zhang_canopy_check()
+            response = dict((h, zhang_response(
+                "O3", temperature(case, t), rel_humidity(case, t)))
+                for (h, t) in ((h, (h - case["start_local_hour"]) * 3600.0)
+                               for h in (7, 10, 12, 15, 18)))
+            print("response of these velocities to temperature and "
+                  "humidity (O3): "
+                  + ", ".join("x %.2f at %02d:00" % (response[h], h)
+                              for h in sorted(response))
+                  + "; check against Table 4 of Zhang et al. (2003): "
+                  "stomatal resistances within %.1f%%, dry-night "
+                  "velocities within %.1f%%" % (1e2 * dev_st,
+                                                1e2 * dev_night))
     else:
         for f in ("drydep_params.dat", "gas_deposition.dat"):
             if os.path.exists(f):
