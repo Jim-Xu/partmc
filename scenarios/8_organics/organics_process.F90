@@ -48,6 +48,19 @@ program process
   !> Whether the groups are secondary organic matter.
   logical, parameter :: GROUP_SECONDARY(N_GROUP) = [.false., .true., &
        .true., .true., .true., .true.]
+  !> Whether the organic species of the groups are part of the
+  !> organic-rich phase, which forms the film of the effective surface
+  !> tension (see llps_ccn below). As in CMAQ (Pye et al., 2017,
+  !> Sect. 2.4 and Table 1), the SOA that forms in the aqueous aerosol,
+  !> here by the uptake of the epoxydiols and other products of isoprene
+  !> and of methylglyoxal, stays in the water-rich phase with the
+  !> inorganic salts; the primary organic matter and the SOA that forms
+  !> in the organic aerosol make up the organic-rich phase. CMAQ also
+  !> keeps the SOA from cloud processing in the water-rich phase; here
+  !> that group is the aged regional organic matter of the initial and
+  !> background particles, and it is left in the organic-rich phase.
+  logical, parameter :: GROUP_IN_FILM(N_GROUP) = [.true., .true., &
+       .true., .false., .false., .true.]
   !> Number of supersaturations of the CCN concentrations.
   integer, parameter :: N_SS = 5
   !> Supersaturations of the CCN concentrations (%).
@@ -119,7 +132,8 @@ program process
   integer :: i_group, i_name, i_spec, i_part
   real(kind=dp) :: time, del_t, tot_num_conc, tot_dry_mass_conc
   real(kind=dp) :: carbon_conc, oxygen_conc, sec_carbon_conc, &
-       sec_oxygen_conc, sec_mass_conc, org_mass_conc
+       sec_oxygen_conc, sec_mass_conc, org_mass_conc, film_carbon_conc, &
+       film_oxygen_conc
   character(len=PMC_UUID_LEN) :: uuid
   character(len=AERO_NAME_LEN) :: group_spec(N_GROUP_SPEC, N_GROUP)
   logical, allocatable :: is_secondary(:)
@@ -169,7 +183,7 @@ program process
        stats_mix_llps_num_frac(N_MIX), stats_mix_llps_org_frac(N_MIX), &
        stats_mix_ccn_conc(N_SS, N_MIX), stats_mix_ccn_est_conc(N_SS, N_MIX), &
        stats_film_num_frac(N_FILM), stats_ccn_film_conc(N_SS, N_FILM), &
-       stats_mix_ccn_film_conc(N_SS, N_FILM, N_MIX)
+       stats_mix_ccn_film_conc(N_SS, N_FILM, N_MIX), stats_film_o_c
   type(stats_2d_t) :: stats_diam_o_c_dist, stats_diam_sec_frac_dist, &
        stats_diam_srh_dist, stats_diam_sc_dist, stats_diam_sc_est_dist, &
        stats_diam_kappa_dist, stats_entry_srh_dist
@@ -238,6 +252,20 @@ program process
              env_state=env_state)
 
         times(i_index) = time
+
+        ! the organic species outside the organic-rich phase are
+        ! dissolved in the aqueous phase: with the surface tension of
+        ! water the effective surface tension treatment counts them in
+        ! the aqueous core and not in the film (aero_data_spec_in_film)
+        do i_group = 1,N_GROUP
+           if (GROUP_IN_FILM(i_group)) cycle
+           do i_name = 1,N_GROUP_SPEC
+              if (len_trim(group_spec(i_name, i_group)) == 0) cycle
+              i_spec = aero_data_spec_by_name(aero_data, &
+                   group_spec(i_name, i_group))
+              if (i_spec > 0) aero_data%sigma(i_spec) = const%water_surf_eng
+           end do
+        end do
 
         dry_diameters = aero_state_dry_diameters(aero_state, aero_data)
         num_concs = aero_state_num_concs(aero_state, aero_data)
@@ -317,6 +345,24 @@ program process
                 sec_oxygen_conc / sec_carbon_conc, i_index)
         else
            call stats_1d_add_entry(stats_sec_o_c, 0d0, i_index)
+        end if
+        ! bulk O:C of the organic matter that forms the film (see llps_ccn
+        ! below), weighted by carbon
+        film_carbon_conc = 0d0
+        film_oxygen_conc = 0d0
+        do i_spec = 1,aero_data_n_spec(aero_data)
+           if (aero_data%om_oc(i_spec) <= 0d0) cycle
+           if (.not. aero_data_spec_in_film(aero_data, i_spec)) cycle
+           film_carbon_conc = film_carbon_conc + spec_mass_concs(i_spec) &
+                / aero_data%om_oc(i_spec)
+           film_oxygen_conc = film_oxygen_conc + spec_mass_concs(i_spec) &
+                / aero_data%om_oc(i_spec) * aero_data%o_c(i_spec)
+        end do
+        if (film_carbon_conc > 0d0) then
+           call stats_1d_add_entry(stats_film_o_c, &
+                film_oxygen_conc / film_carbon_conc, i_index)
+        else
+           call stats_1d_add_entry(stats_film_o_c, 0d0, i_index)
         end if
 
         ! distribution of the per-particle O:C, over the particles that
@@ -670,6 +716,8 @@ program process
           "ccn_est_conc_" // CCN_SS_NAME(i_ss), dim_name="time", &
           unit="m^{-3}")
   end do
+  call stats_1d_output_netcdf(stats_film_o_c, ncid, "film_o_c", &
+       dim_name="time", unit="1")
   do i_film = 1,N_FILM
      call stats_1d_output_netcdf(stats_film_num_frac(i_film), ncid, &
           "film_num_frac_" // FILM_NAME(i_film), dim_name="time", unit="1")
@@ -793,9 +841,13 @@ contains
   !! mixes with the aqueous phase. The separation relative humidity
   !! above does not tell which particles keep the film, because it is
   !! below 1 for every OM/OC and the particles activate above 1. Here
-  !! the particles keep the film whose organic matter has an O:C (the
-  !! average of the particle, weighted by carbon) of at most a limit;
-  !! the others take the value with the surface tension of water. This
+  !! the particles keep the film whose film-forming organic matter has
+  !! an O:C (the average of the particle, weighted by carbon) of at most
+  !! a limit; the others take the value with the surface tension of
+  !! water. The film-forming organic matter is that of the organic
+  !! species with a surface tension below that of water
+  !! (aero_data_spec_in_film), which the program sets from GROUP_IN_FILM;
+  !! the other organic species are part of the aqueous core. This
   !! is done for each limit of FILM_O_C: O:C up to which two liquid
   !! phases were observed near saturation or at supersaturation, in
   !! secondary organic material without salts (Renbaum-Wolff et al.,
@@ -839,7 +891,8 @@ contains
 
     integer :: n_part, i_part, i_salt, i_spec, i_film
     real(kind=dp), allocatable :: org_carbon_masses(:), salt_masses(:), &
-         o_cs(:)
+         film_carbon_masses(:), film_o_cs(:)
+    logical, allocatable :: film_spec(:)
 
     n_part = aero_state_n_part(aero_state)
     org_masses = aero_state_organic_masses(aero_state, aero_data)
@@ -882,13 +935,36 @@ contains
        if (kappas(i_part) < 1d-30) scs_est(i_part) = scs(i_part)
     end do
 
-    o_cs = aero_state_o_c(aero_state, aero_data)
+    ! carbon mass and O:C of the film-forming organic matter of each
+    ! particle (as aero_particle_organic_carbon_mass and
+    ! aero_particle_o_c, over the film-forming species only)
+    allocate(film_spec(aero_data_n_spec(aero_data)))
+    do i_spec = 1,aero_data_n_spec(aero_data)
+       film_spec(i_spec) = (aero_data%om_oc(i_spec) > 0d0)
+       if (film_spec(i_spec)) then
+          film_spec(i_spec) = aero_data_spec_in_film(aero_data, i_spec)
+       end if
+    end do
+    allocate(film_carbon_masses(n_part), film_o_cs(n_part))
+    do i_part = 1,n_part
+       film_carbon_masses(i_part) &
+            = sum(aero_state%apa%particle(i_part)%vol * aero_data%density &
+            / aero_data%om_oc, mask=film_spec)
+       if (film_carbon_masses(i_part) > 0d0) then
+          film_o_cs(i_part) &
+               = sum(aero_state%apa%particle(i_part)%vol &
+               * aero_data%density / aero_data%om_oc * aero_data%o_c, &
+               mask=film_spec) / film_carbon_masses(i_part)
+       else
+          film_o_cs(i_part) = 0d0
+       end if
+    end do
     if (allocated(has_film)) deallocate(has_film)
     if (allocated(scs_film)) deallocate(scs_film)
     allocate(has_film(n_part, N_FILM), scs_film(n_part, N_FILM))
     do i_film = 1,N_FILM
-       has_film(:, i_film) = (org_carbon_masses > 0d0) &
-            .and. (o_cs <= FILM_O_C(i_film))
+       has_film(:, i_film) = (film_carbon_masses > 0d0) &
+            .and. (film_o_cs <= FILM_O_C(i_film))
        scs_film(:, i_film) = merge(scs_est, scs, has_film(:, i_film))
     end do
 

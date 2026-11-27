@@ -353,6 +353,29 @@ contains
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+  !> Whether an organic species forms the surface film of the effective
+  !> surface tension (EST) treatment.
+  !!
+  !! It does if its surface tension \c aero_data%%sigma is below that of
+  !! water. An organic species with the surface tension of water (or
+  !! above) does not lower the surface tension of a droplet: it is taken
+  !! to be dissolved in the aqueous core, as the soluble inorganic
+  !! species are. So the surface tensions of the organic species in the
+  !! aerosol data decide which organic matter is in the film.
+  logical function aero_data_spec_in_film(aero_data, i_spec)
+
+    !> Aero_data data.
+    type(aero_data_t), intent(in) :: aero_data
+    !> Index of an organic species (one of \c AERO_ORGANIC_SPEC_NAME).
+    integer, intent(in) :: i_spec
+
+    aero_data_spec_in_film &
+         = (aero_data%sigma(i_spec) < const%water_surf_eng)
+
+  end function aero_data_spec_in_film
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
   !> Returns the number of the source in aero_data with the given name, or
   !> adds the source if it doesn't exist yet.
   integer function aero_data_source_by_name(aero_data, name)
@@ -504,7 +527,11 @@ contains
     !!     zero, then inferred from the ions value
     !!   - abifm_m: The m parameter for ABIFM algorithm
     !!   - abifm_c: The c parameter for ABIFM algorithm
-    !!   - surface tension (real, unit J/m^2)
+    !!   - surface tension (real, unit J/m^2) - used by the effective
+    !!     surface tension (EST) treatment; an organic species forms the
+    !!     surface film if its value is below the surface tension of
+    !!     water and is part of the aqueous core otherwise, see
+    !!     aero_data_spec_in_film()
     !!   - O:C (real, dimensionless, optional) - atomic oxygen-to-carbon
     !!     ratio of an organic species
     !!   - OM:OC (real, dimensionless, optional) - ratio of organic mass

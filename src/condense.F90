@@ -446,7 +446,7 @@ contains
 
     real(kind=dp) :: v_sol, soluble_volume, sum_sol_sigma, v_water
 
-    v_org = aero_particle_organic_volume(aero_particle, aero_data)
+    v_org = aero_particle_film_volume(aero_particle, aero_data)
     v_sol = const%pi / 6d0 * D**3 &
          - aero_particle_solid_volume(aero_particle, aero_data) - v_org
     if (v_sol > 0d0) then

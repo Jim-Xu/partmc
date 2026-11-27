@@ -1001,7 +1001,7 @@ contains
     dry_diam = aero_particle_dry_diameter(aero_particle, aero_data)
     surf_eng_organic = aero_particle_surf_eng_organic(aero_particle, aero_data)
     v_solid = aero_particle_solid_volume(aero_particle, aero_data)
-    v_org = aero_particle_organic_volume(aero_particle, aero_data)
+    v_org = aero_particle_film_volume(aero_particle, aero_data)
     ! These soluble sums are constant for the particle, so resolve them (and the
     ! species-name lookups they need) once here rather than on every scan point.
     call aero_particle_soluble_sums(aero_particle, aero_data, soluble_volume, &
@@ -1238,6 +1238,37 @@ contains
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+  !> Volume of the organic matter of the particle that forms the surface
+  !> film of the effective surface tension (EST) treatment (m^3): the
+  !> organic species with a surface tension below that of water (see
+  !> aero_data_spec_in_film()). The other organic species are part of
+  !> the aqueous core (see aero_particle_soluble_sums()).
+  real(kind=dp) function aero_particle_film_volume(aero_particle, aero_data)
+
+    !> Particle.
+    type(aero_particle_t), intent(in) :: aero_particle
+    !> Aerosol data.
+    type(aero_data_t), intent(in) :: aero_data
+    integer :: i_org_spec, i_spec
+
+    aero_particle_film_volume = 0d0
+
+    do i_org_spec = 1, size(AERO_ORGANIC_SPEC_NAME)
+       i_spec = aero_data_spec_by_name(aero_data, &
+            AERO_ORGANIC_SPEC_NAME(i_org_spec))
+       ! skip names absent from aero_data (spec_by_name returns 0)
+       if (i_spec > 0) then
+          if (aero_data_spec_in_film(aero_data, i_spec)) then
+             aero_particle_film_volume = aero_particle_film_volume &
+                  + aero_particle%vol(i_spec)
+          end if
+       end if
+    end do
+
+  end function aero_particle_film_volume
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
   !> Mass of the organic matter of the particle (kg), which is the
   !> total mass of the species with a positive \c aero_data%om_oc.
   elemental real(kind=dp) function aero_particle_organic_mass( &
@@ -1355,8 +1386,11 @@ contains
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   !> Returns two diameter-independent per-particle sums over the soluble
-  !> inorganic species: the total soluble volume and the volume-weighted
-  !> surface-tension sum \f$\sum_i V_i \sigma_i\f$. The caller resolves these
+  !> species of the aqueous core: the total soluble volume and the
+  !> volume-weighted surface-tension sum \f$\sum_i V_i \sigma_i\f$. The
+  !> soluble species are the soluble inorganic species and the organic
+  !> species that do not form the surface film (those with the surface
+  !> tension of water, see aero_data_spec_in_film()). The caller resolves these
   !> once and then forms the soluble-core surface tension at any wet diameter
   !> by cheap arithmetic, avoiding per-diameter species-name lookups.
   subroutine aero_particle_soluble_sums(aero_particle, aero_data, &
@@ -1366,12 +1400,12 @@ contains
     type(aero_particle_t), intent(in) :: aero_particle
     !> Aerosol data.
     type(aero_data_t), intent(in) :: aero_data
-    !> Total soluble inorganic volume (m^3).
+    !> Total soluble volume (m^3).
     real(kind=dp), intent(out) :: soluble_volume
     !> Volume-weighted surface-tension sum \f$\sum_i V_i \sigma_i\f$ (m J m^-2).
     real(kind=dp), intent(out) :: sum_sol_sigma
 
-    integer :: i_sol_spec, i_spec
+    integer :: i_sol_spec, i_org_spec, i_spec
     character(len=AERO_NAME_LEN), parameter, dimension(7) :: &
     sol_spec = ["SO4   ", "NO3   ", "Cl    ", "NH4   ", "CO3   ", &
                 "Na    ", "Ca    "]
@@ -1385,6 +1419,18 @@ contains
           soluble_volume = soluble_volume + aero_particle%vol(i_spec)
           sum_sol_sigma = sum_sol_sigma &
                + aero_particle%vol(i_spec) * aero_data%sigma(i_spec)
+       end if
+    end do
+    ! organic species that do not form the film are dissolved in the core
+    do i_org_spec = 1, size(AERO_ORGANIC_SPEC_NAME)
+       i_spec = aero_data_spec_by_name(aero_data, &
+            AERO_ORGANIC_SPEC_NAME(i_org_spec))
+       if (i_spec > 0) then
+          if (.not. aero_data_spec_in_film(aero_data, i_spec)) then
+             soluble_volume = soluble_volume + aero_particle%vol(i_spec)
+             sum_sol_sigma = sum_sol_sigma &
+                  + aero_particle%vol(i_spec) * aero_data%sigma(i_spec)
+          end if
        end if
     end do
 
@@ -1404,23 +1450,27 @@ contains
     real(kind=dp) :: org_volume
     integer :: i_org_spec, i_spec
 
-    org_volume = aero_particle_organic_volume(aero_particle, aero_data)
+    org_volume = aero_particle_film_volume(aero_particle, aero_data)
     aero_particle_surf_eng_organic = 0d0
 
     if (org_volume <= 0d0) then
-       ! No organic material: the film surface tension is undefined. Return
-       ! zero to avoid a 0/0; the caller only uses this through
-       ! c_5 = v_org * (sigma_org - sigma_sol), which is zero when v_org = 0.
+       ! No organic material in the film: the film surface tension is
+       ! undefined. Return zero to avoid a 0/0; the caller only uses this
+       ! through c_5 = v_org * (sigma_org - sigma_sol), which is zero when
+       ! v_org = 0.
        return
     end if
 
+    ! average over the organic species that form the film
     do i_org_spec = 1, size(AERO_ORGANIC_SPEC_NAME)
       i_spec = aero_data_spec_by_name(aero_data, &
            AERO_ORGANIC_SPEC_NAME(i_org_spec))
       if (i_spec > 0) then
-        aero_particle_surf_eng_organic = aero_particle_surf_eng_organic &
-                + aero_particle%vol(i_spec) * &
-                aero_data%sigma(i_spec) / org_volume
+        if (aero_data_spec_in_film(aero_data, i_spec)) then
+          aero_particle_surf_eng_organic = aero_particle_surf_eng_organic &
+               + aero_particle%vol(i_spec) * &
+               aero_data%sigma(i_spec) / org_volume
+        end if
       end if
     end do
 
